@@ -1,0 +1,65 @@
+The hairSalon project is actually called "NailFlow AI" - a comprehensive salon management platform with built-in multi-tenant support. You can easily add a nail salon to it!
+
+  Key Findings
+
+  | Aspect      | Details                                           |
+  |-------------|---------------------------------------------------|
+  | Name        | NailFlow AI                                       |
+  | Stack       | Next.js 16, React 19, MUI v7, PostgreSQL, Prisma  |
+  | Multi-Salon | Built-in via salonId on all models                |
+  | Features    | 64 API endpoints, 11 AI features, full management |
+
+  How to Add Your Nail Salon
+
+  Option 1: Via API (Recommended)
+
+  # Login as owner first, then:
+  curl -X POST http://localhost:3000/api/salons \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "Elegant Nails",
+      "address": "123 Main St, Your City",
+      "phone": "(555) 123-4567",
+      "email": "info@elegantnails.com",
+      "timezone": "America/New_York",
+      "primaryLanguage": "en"
+    }'
+
+  Option 2: Via Seed Script
+
+  Edit /Users/erolakarsu/projects/hairSalon/prisma/seed.ts:
+
+  const nailSalon = await prisma.salon.create({
+    data: {
+      name: 'Elegant Nails',
+      address: '123 Main St, Your City',
+      phone: '(555) 123-4567',
+      email: 'info@elegantnails.com',
+      timezone: 'America/New_York',
+      primaryLanguage: 'en',
+    },
+  });
+
+  Then run: npx prisma db seed
+
+  Option 3: Switch Salon Context
+
+  If you're already logged in as an owner, use:
+  POST /api/salons/switch
+  { "salonId": "<new-salon-id>" }
+
+  Features Already Available
+
+  - Appointments & Calendar
+  - Client Management
+  - Services Catalog
+  - Staff Scheduling
+  - Loyalty Program (Points/Tiers)
+  - Gift Cards
+  - Inventory Tracking
+  - AI Chat & Marketing
+  - Multi-language Support (EN, ES, VI, ZH, KO)
+  - Public Booking Portal
+  - Review Management
+
+  Would you like me to add a nail salon to the hairSalon project now?

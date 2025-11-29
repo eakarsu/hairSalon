@@ -1,0 +1,853 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ ENUMS ============
+
+enum UserRole {
+  OWNER
+  MANAGER
+  TECHNICIAN
+  FRONTDESK
+  CLIENT_USER
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CONFIRMED
+  COMPLETED
+  NO_SHOW
+  CANCELLED
+}
+
+enum AppointmentSource {
+  ONLINE
+  PHONE
+  WALKIN
+}
+
+enum LoyaltyTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+}
+
+enum LoyaltyTransactionType {
+  EARN
+  REDEEM
+  ADJUST
+}
+
+enum CampaignType {
+  REMINDER
+  NO_SHOW_RECOVERY
+  LOYALTY
+  PROMO
+}
+
+enum CampaignStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum MessageChannel {
+  SMS
+  EMAIL
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum TaskType {
+  FOLLOW_UP
+  STAFFING
+  INVENTORY
+  OTHER
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum AIContextType {
+  REMINDER
+  MULTILANG
+  LOYALTY
+  KPI
+  REVIEW
+  VISIT_NOTES
+  RESCHEDULE
+  SERVICE_RECOMMEND
+  CHAT
+  STAFF_INSIGHTS
+  NOSHOW_PREDICT
+  MARKETING
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  GIFT_CARD
+  OTHER
+}
+
+enum GiftCardStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  CANCELLED
+}
+
+enum WaitlistStatus {
+  WAITING
+  NOTIFIED
+  SEATED
+  LEFT
+  CANCELLED
+}
+
+enum ServiceCategory {
+  // Barbershop services
+  HAIRCUT
+  BEARD
+  SHAVE
+  COLORING
+  // Nail salon services
+  MANICURE
+  PEDICURE
+  GEL
+  ACRYLIC
+  NAIL_ART
+  // Common
+  ADDON
+  OTHER
+}
+
+enum InventoryCategory {
+  NAIL_POLISH
+  GEL
+  ACRYLIC
+  TOOLS
+  SANITIZATION
+  DISPOSABLES
+  OTHER
+}
+
+// ============ MODELS ============
+
+model Salon {
+  id              String   @id @default(cuid())
+  name            String
+  address         String
+  phone           String
+  email           String
+  timezone        String   @default("America/New_York")
+  primaryLanguage String   @default("en")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  users                    User[]
+  services                 Service[]
+  clients                  Client[]
+  appointments             Appointment[]
+  loyaltyAccounts          LoyaltyAccount[]
+  staffSchedules           StaffSchedule[]
+  campaigns                Campaign[]
+  tasks                    Task[]
+  aiAuditLogs              AIAuditLog[]
+  inventoryItems           InventoryItem[]
+  giftCards                GiftCard[]
+  waitlistEntries          Waitlist[]
+  payments                 Payment[]
+  tips                     Tip[]
+  galleryPhotos            GalleryPhoto[]
+  serviceAddons            ServiceAddon[]
+  recurringAppointments    RecurringAppointment[]
+  chatMessages             ChatMessage[]
+  reviews                  Review[]
+  noShowPredictions        NoShowPrediction[]
+
+  @@index([email])
+}
+
+model User {
+  id                String   @id @default(cuid())
+  salonId           String
+  name              String
+  email             String   @unique
+  hashedPassword    String
+  role              UserRole
+  phone             String?
+  active            Boolean  @default(true)
+  preferredLanguage String   @default("en")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  salon                 Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  appointments          Appointment[]          @relation("TechnicianAppointments")
+  preferredByClients    Client[]               @relation("PreferredTechnician")
+  visits                Visit[]
+  staffSchedules        StaffSchedule[]
+  assignedTasks         Task[]
+  tips                  Tip[]
+  galleryPhotos         GalleryPhoto[]
+  recurringAppointments RecurringAppointment[] @relation("RecurringTechnician")
+
+  @@index([salonId])
+  @@index([email])
+  @@index([role])
+}
+
+model Service {
+  id              String          @id @default(cuid())
+  salonId         String
+  name            String
+  description     String?
+  category        ServiceCategory @default(OTHER)
+  durationMinutes Int
+  basePrice       Float
+  active          Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  salon                 Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  appointments          Appointment[]
+  addons                ServiceAddon[]
+  recurringAppointments RecurringAppointment[]
+
+  @@index([salonId])
+  @@index([active])
+  @@index([category])
+}
+
+model Client {
+  id                String   @id @default(cuid())
+  salonId           String
+  name              String
+  phone             String
+  email             String?
+  preferredTechId   String?
+  preferredLanguage String   @default("en")
+  marketingOptIn    Boolean  @default(true)
+  birthday          DateTime?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  salon                 Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  preferredTech         User?                  @relation("PreferredTechnician", fields: [preferredTechId], references: [id], onDelete: SetNull)
+  appointments          Appointment[]
+  visits                Visit[]
+  loyaltyAccount        LoyaltyAccount?
+  campaignMessages      CampaignMessage[]
+  aiAuditLogs           AIAuditLog[]
+  giftCards             GiftCard[]
+  waitlistEntries       Waitlist[]
+  payments              Payment[]
+  recurringAppointments RecurringAppointment[]
+  chatMessages          ChatMessage[]
+  reviews               Review[]
+
+  @@index([salonId])
+  @@index([phone])
+  @@index([email])
+  @@index([preferredTechId])
+}
+
+model Appointment {
+  id           String            @id @default(cuid())
+  salonId      String
+  clientId     String
+  technicianId String
+  serviceId    String
+  startTime    DateTime
+  endTime      DateTime
+  status       AppointmentStatus @default(BOOKED)
+  source       AppointmentSource @default(ONLINE)
+  notes        String?
+  depositPaid  Boolean           @default(false)
+  depositAmount Float?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  // Relations
+  salon            Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  client           Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  technician       User              @relation("TechnicianAppointments", fields: [technicianId], references: [id], onDelete: Cascade)
+  service          Service           @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  visit            Visit?
+  payment          Payment?
+  tip              Tip?
+  review           Review?
+  noShowPrediction NoShowPrediction?
+
+  @@index([salonId])
+  @@index([clientId])
+  @@index([technicianId])
+  @@index([serviceId])
+  @@index([startTime])
+  @@index([status])
+}
+
+model Visit {
+  id                String   @id @default(cuid())
+  appointmentId     String   @unique
+  clientId          String
+  technicianId      String
+  nailShape         String?
+  length            String?
+  designDescription String?
+  colorCodes        String?
+  photos            Json?
+  rating            Int?
+  createdAt         DateTime @default(now())
+
+  // Relations
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  technician  User        @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([technicianId])
+  @@index([createdAt])
+}
+
+model LoyaltyAccount {
+  id            String      @id @default(cuid())
+  salonId       String
+  clientId      String      @unique
+  pointsBalance Int         @default(0)
+  tier          LoyaltyTier @default(BRONZE)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relations
+  salon        Salon                @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  client       Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  transactions LoyaltyTransaction[]
+
+  @@index([salonId])
+  @@index([tier])
+}
+
+model LoyaltyTransaction {
+  id               String                 @id @default(cuid())
+  loyaltyAccountId String
+  type             LoyaltyTransactionType
+  points           Int
+  description      String?
+  createdAt        DateTime               @default(now())
+
+  // Relations
+  loyaltyAccount LoyaltyAccount @relation(fields: [loyaltyAccountId], references: [id], onDelete: Cascade)
+
+  @@index([loyaltyAccountId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model StaffSchedule {
+  id           String   @id @default(cuid())
+  salonId      String
+  technicianId String
+  dayOfWeek    Int      // 0 = Sunday, 6 = Saturday
+  startTime    String   // e.g., "09:00"
+  endTime      String   // e.g., "17:00"
+  isWorking    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  technician User  @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@unique([technicianId, dayOfWeek])
+  @@index([salonId])
+  @@index([technicianId])
+}
+
+model Campaign {
+  id            String         @id @default(cuid())
+  salonId       String
+  name          String
+  type          CampaignType
+  audienceQuery Json?
+  status        CampaignStatus @default(ACTIVE)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Relations
+  salon    Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  messages CampaignMessage[]
+
+  @@index([salonId])
+  @@index([type])
+  @@index([status])
+}
+
+model CampaignMessage {
+  id          String        @id @default(cuid())
+  campaignId  String
+  clientId    String
+  channel     MessageChannel
+  language    String        @default("en")
+  scheduledAt DateTime
+  sentAt      DateTime?
+  status      MessageStatus @default(PENDING)
+  body        String
+
+  // Relations
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  client   Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([clientId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+model Task {
+  id               String     @id @default(cuid())
+  salonId          String
+  title            String
+  description      String?
+  type             TaskType   @default(OTHER)
+  status           TaskStatus @default(OPEN)
+  dueDate          DateTime?
+  assignedToUserId String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  // Relations
+  salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  assignedTo User? @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  @@index([salonId])
+  @@index([status])
+  @@index([type])
+  @@index([dueDate])
+  @@index([assignedToUserId])
+}
+
+model AIAuditLog {
+  id            String        @id @default(cuid())
+  salonId       String
+  clientId      String?
+  contextType   AIContextType
+  inputSummary  String
+  outputSummary String
+  createdAt     DateTime      @default(now())
+
+  // Relations
+  salon  Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([salonId])
+  @@index([clientId])
+  @@index([contextType])
+  @@index([createdAt])
+}
+
+// ============ NEW FEATURE MODELS ============
+
+model InventoryItem {
+  id           String            @id @default(cuid())
+  salonId      String
+  name         String
+  sku          String?
+  category     InventoryCategory
+  quantity     Int               @default(0)
+  minQuantity  Int               @default(5)
+  costPrice    Float?
+  retailPrice  Float?
+  supplier     String?
+  active       Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  // Relations
+  salon        Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  transactions InventoryTransaction[]
+
+  @@unique([salonId, sku])
+  @@index([salonId])
+  @@index([category])
+  @@index([quantity])
+}
+
+model InventoryTransaction {
+  id              String   @id @default(cuid())
+  inventoryItemId String
+  quantityChange  Int
+  reason          String?
+  performedBy     String?
+  createdAt       DateTime @default(now())
+
+  // Relations
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@index([inventoryItemId])
+  @@index([createdAt])
+}
+
+model GiftCard {
+  id           String         @id @default(cuid())
+  salonId      String
+  code         String         @unique
+  initialValue Float
+  balance      Float
+  purchasedBy  String?
+  recipientId  String?
+  status       GiftCardStatus @default(ACTIVE)
+  expiresAt    DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  // Relations
+  salon     Salon    @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  recipient Client?  @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+  payments  Payment[]
+
+  @@index([salonId])
+  @@index([code])
+  @@index([status])
+}
+
+model Waitlist {
+  id            String         @id @default(cuid())
+  salonId       String
+  clientId      String?
+  clientName    String
+  clientPhone   String
+  partySize     Int            @default(1)
+  serviceId     String?
+  preferredTech String?
+  notes         String?
+  status        WaitlistStatus @default(WAITING)
+  estimatedWait Int?
+  notifiedAt    DateTime?
+  seatedAt      DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  // Relations
+  salon  Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([salonId])
+  @@index([clientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  salonId       String
+  appointmentId String?       @unique
+  clientId      String
+  amount        Float
+  method        PaymentMethod
+  status        PaymentStatus @default(PENDING)
+  giftCardId    String?
+  stripeId      String?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  giftCard    GiftCard?    @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
+
+  @@index([salonId])
+  @@index([appointmentId])
+  @@index([clientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Tip {
+  id            String   @id @default(cuid())
+  salonId       String
+  appointmentId String   @unique
+  technicianId  String
+  amount        Float
+  method        PaymentMethod
+  createdAt     DateTime @default(now())
+
+  // Relations
+  salon       Salon       @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  technician  User        @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([technicianId])
+  @@index([createdAt])
+}
+
+model GalleryPhoto {
+  id           String   @id @default(cuid())
+  salonId      String
+  technicianId String
+  visitId      String?
+  imageUrl     String
+  thumbnailUrl String?
+  title        String?
+  description  String?
+  tags         String[]
+  featured     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  technician User  @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([technicianId])
+  @@index([featured])
+  @@index([createdAt])
+}
+
+model BookingSettings {
+  id                    String   @id @default(cuid())
+  salonId               String   @unique
+  allowOnlineBooking    Boolean  @default(true)
+  requireDeposit        Boolean  @default(false)
+  depositAmount         Float?
+  minAdvanceHours       Int      @default(2)
+  maxAdvanceDays        Int      @default(30)
+  allowWalkIns          Boolean  @default(true)
+  confirmationRequired  Boolean  @default(true)
+  reminderHoursBefore   Int      @default(24)
+  cancellationHours     Int      @default(24)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([salonId])
+}
+
+model SMSLog {
+  id          String   @id @default(cuid())
+  salonId     String
+  toPhone     String
+  fromPhone   String?
+  message     String
+  twilioSid   String?
+  status      String
+  errorCode   String?
+  createdAt   DateTime @default(now())
+
+  @@index([salonId])
+  @@index([toPhone])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ============ NEW FEATURES MODELS ============
+
+// Service Add-ons for upselling
+model ServiceAddon {
+  id          String   @id @default(cuid())
+  salonId     String
+  serviceId   String
+  name        String
+  description String?
+  price       Float
+  duration    Int      @default(0) // Additional minutes
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  salon   Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([serviceId])
+}
+
+// Recurring Appointments
+model RecurringAppointment {
+  id              String   @id @default(cuid())
+  salonId         String
+  clientId        String
+  technicianId    String
+  serviceId       String
+  frequency       RecurringFrequency
+  dayOfWeek       Int?     // 0-6 for weekly
+  dayOfMonth      Int?     // 1-31 for monthly
+  preferredTime   String   // e.g., "10:00"
+  startDate       DateTime
+  endDate         DateTime?
+  active          Boolean  @default(true)
+  nextOccurrence  DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  salon      Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  client     Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  technician User    @relation("RecurringTechnician", fields: [technicianId], references: [id], onDelete: Cascade)
+  service    Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([clientId])
+  @@index([active])
+  @@index([nextOccurrence])
+}
+
+enum RecurringFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+// AI Chat Messages
+model ChatMessage {
+  id            String   @id @default(cuid())
+  salonId       String
+  sessionId     String   // Groups messages in a conversation
+  role          String   // 'user' or 'assistant'
+  content       String
+  clientId      String?
+  metadata      Json?    // Store any additional context
+  createdAt     DateTime @default(now())
+
+  salon  Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([salonId])
+  @@index([sessionId])
+  @@index([clientId])
+  @@index([createdAt])
+}
+
+// Client Reviews
+model Review {
+  id           String       @id @default(cuid())
+  salonId      String
+  clientId     String?
+  appointmentId String?     @unique
+  platform     ReviewPlatform
+  rating       Int          // 1-5
+  content      String?
+  response     String?      // Salon's response
+  respondedAt  DateTime?
+  externalId   String?      // ID from Google/Yelp
+  reviewDate   DateTime     @default(now())
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  client      Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  @@index([salonId])
+  @@index([clientId])
+  @@index([platform])
+  @@index([rating])
+  @@index([reviewDate])
+}
+
+enum ReviewPlatform {
+  GOOGLE
+  YELP
+  INTERNAL
+  FACEBOOK
+}
+
+// No-Show Predictions
+model NoShowPrediction {
+  id            String   @id @default(cuid())
+  salonId       String
+  appointmentId String   @unique
+  riskScore     Float    // 0-1 probability
+  riskLevel     RiskLevel
+  factors       Json     // Factors that contributed to score
+  notified      Boolean  @default(false)
+  outcome       String?  // SHOWED, NO_SHOW, CANCELLED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  salon       Salon       @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([riskLevel])
+  @@index([createdAt])
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// Email Logs (similar to SMS logs)
+model EmailLog {
+  id          String   @id @default(cuid())
+  salonId     String
+  toEmail     String
+  fromEmail   String?
+  subject     String
+  body        String
+  status      String
+  provider    String?  // sendgrid, ses, etc.
+  externalId  String?
+  errorMsg    String?
+  createdAt   DateTime @default(now())
+
+  @@index([salonId])
+  @@index([toEmail])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Real-time Notification Subscriptions
+model NotificationSubscription {
+  id        String   @id @default(cuid())
+  salonId   String
+  userId    String?
+  endpoint  String   // Push subscription endpoint or WebSocket ID
+  type      NotificationType
+  active    Boolean  @default(true)
+  metadata  Json?    // Keys, auth tokens, etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([salonId])
+  @@index([userId])
+  @@index([type])
+  @@index([active])
+}
+
+enum NotificationType {
+  PUSH
+  WEBSOCKET
+  EMAIL
+  SMS
+}
