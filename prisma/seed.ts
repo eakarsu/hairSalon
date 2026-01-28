@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole, AppointmentStatus, AppointmentSource, LoyaltyTier, LoyaltyTransactionType, CampaignType, CampaignStatus, MessageChannel, MessageStatus, TaskType, TaskStatus, AIContextType, InventoryCategory, GiftCardStatus, WaitlistStatus, PaymentStatus, PaymentMethod, ReviewPlatform, ServiceCategory } from '@prisma/client';
+import { PrismaClient, UserRole, AppointmentStatus, AppointmentSource, LoyaltyTier, LoyaltyTransactionType, CampaignType, CampaignStatus, MessageChannel, MessageStatus, TaskType, TaskStatus, AIContextType, InventoryCategory, GiftCardStatus, WaitlistStatus, PaymentStatus, PaymentMethod, ReviewPlatform, ServiceCategory, TechnicianLevel, CommissionStatus, TimeOffStatus, SkillLevel, MembershipStatus, BillingCycle, ReferralStatus } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { addDays, subDays, setHours, setMinutes, format } from 'date-fns';
 
@@ -11,6 +11,7 @@ async function main() {
   await prisma.aIAuditLog.deleteMany();
   await prisma.review.deleteMany();
   await prisma.tip.deleteMany();
+  await prisma.paymentSplit.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.giftCard.deleteMany();
   await prisma.waitlist.deleteMany();
@@ -23,7 +24,25 @@ async function main() {
   await prisma.loyaltyAccount.deleteMany();
   await prisma.staffSchedule.deleteMany();
   await prisma.visit.deleteMany();
+  await prisma.appointmentService.deleteMany();
   await prisma.appointment.deleteMany();
+  // Clean new feature tables
+  await prisma.referral.deleteMany();
+  await prisma.stationAssignment.deleteMany();
+  await prisma.station.deleteMany();
+  await prisma.technicianSkill.deleteMany();
+  await prisma.timeOffRequest.deleteMany();
+  await prisma.membership.deleteMany();
+  await prisma.membershipPlan.deleteMany();
+  await prisma.packageSale.deleteMany();
+  await prisma.packageService.deleteMany();
+  await prisma.servicePackage.deleteMany();
+  await prisma.retailSale.deleteMany();
+  await prisma.retailProduct.deleteMany();
+  await prisma.commission.deleteMany();
+  await prisma.commissionRule.deleteMany();
+  await prisma.servicePricing.deleteMany();
+  await prisma.clientFamily.deleteMany();
   await prisma.client.deleteMany();
   await prisma.service.deleteMany();
   await prisma.user.deleteMany();
@@ -71,7 +90,7 @@ async function main() {
         preferredLanguage: 'es',
       },
     }),
-    // Technicians
+    // Technicians (with levels)
     prisma.user.create({
       data: {
         salonId: salon.id,
@@ -81,6 +100,7 @@ async function main() {
         role: UserRole.TECHNICIAN,
         phone: '(408) 555-0102',
         preferredLanguage: 'vi',
+        level: TechnicianLevel.MASTER,
       },
     }),
     prisma.user.create({
@@ -92,6 +112,7 @@ async function main() {
         role: UserRole.TECHNICIAN,
         phone: '(408) 555-0103',
         preferredLanguage: 'vi',
+        level: TechnicianLevel.SENIOR,
       },
     }),
     prisma.user.create({
@@ -103,6 +124,7 @@ async function main() {
         role: UserRole.TECHNICIAN,
         phone: '(408) 555-0104',
         preferredLanguage: 'zh',
+        level: TechnicianLevel.SENIOR,
       },
     }),
     prisma.user.create({
@@ -114,6 +136,7 @@ async function main() {
         role: UserRole.TECHNICIAN,
         phone: '(408) 555-0105',
         preferredLanguage: 'ko',
+        level: TechnicianLevel.JUNIOR,
       },
     }),
     // Front Desk
@@ -717,6 +740,318 @@ async function main() {
     }),
   ]);
   console.log('Created', auditLogs.length, 'AI audit logs');
+
+  // ============================================================
+  // NEW FEATURES SEED DATA
+  // ============================================================
+  console.log('\n--- Seeding New Features ---');
+
+  // Service Pricing Tiers (15+ entries)
+  const pricingData = [];
+  for (let i = 0; i < Math.min(15, services.length); i++) {
+    const service = services[i];
+    pricingData.push(
+      { serviceId: service.id, level: TechnicianLevel.JUNIOR, price: Math.round(service.basePrice * 0.85) },
+      { serviceId: service.id, level: TechnicianLevel.SENIOR, price: service.basePrice },
+      { serviceId: service.id, level: TechnicianLevel.MASTER, price: Math.round(service.basePrice * 1.2) },
+      { serviceId: service.id, level: TechnicianLevel.SPECIALIST, price: Math.round(service.basePrice * 1.35) }
+    );
+  }
+  await Promise.all(
+    pricingData.map(p => prisma.servicePricing.create({
+      data: { salonId: salon.id, ...p }
+    }))
+  );
+  console.log('Created', pricingData.length, 'service pricing tiers');
+
+  // Commission Rules (one per technician)
+  const commissionRules = await Promise.all(
+    technicians.map((tech, i) =>
+      prisma.commissionRule.create({
+        data: {
+          salonId: salon.id,
+          technicianId: tech.id,
+          serviceRate: [0.45, 0.50, 0.55, 0.48][i % 4],
+          productRate: [0.10, 0.12, 0.15, 0.10][i % 4],
+          tipRate: 1.0,
+        },
+      })
+    )
+  );
+  console.log('Created', commissionRules.length, 'commission rules');
+
+  // Commissions (20+ entries)
+  const commissionsData = [];
+  for (let i = 0; i < 25; i++) {
+    const tech = technicians[i % technicians.length];
+    const serviceAmount = [80, 120, 150, 200, 95, 175, 220, 130][i % 8];
+    const rule = commissionRules.find(r => r.technicianId === tech.id);
+    commissionsData.push({
+      salonId: salon.id,
+      technicianId: tech.id,
+      serviceAmount,
+      productAmount: i % 3 === 0 ? [25, 45, 60][i % 3] : 0,
+      tipAmount: [10, 15, 20, 25, 8, 12][i % 6],
+      commissionRate: rule?.serviceRate || 0.45,
+      commissionAmount: serviceAmount * (rule?.serviceRate || 0.45),
+      period: i < 15 ? format(subDays(now, 30), 'yyyy-MM') : format(now, 'yyyy-MM'),
+      status: i < 10 ? CommissionStatus.PAID : i < 18 ? CommissionStatus.APPROVED : CommissionStatus.PENDING,
+      paidAt: i < 10 ? subDays(now, 5) : null,
+    });
+  }
+  await Promise.all(commissionsData.map(c => prisma.commission.create({ data: c })));
+  console.log('Created', commissionsData.length, 'commissions');
+
+  // Retail Products (20+ entries)
+  const retailProductsData = [
+    { name: 'OPI Nail Envy', description: 'Nail strengthening treatment', sku: 'OPI-NE-001', category: 'Nail Care', brand: 'OPI', costPrice: 8, retailPrice: 18, quantity: 25, minQuantity: 5 },
+    { name: 'CND Solar Oil', description: 'Cuticle oil for nail and skin care', sku: 'CND-SO-001', category: 'Nail Care', brand: 'CND', costPrice: 5, retailPrice: 12, quantity: 30, minQuantity: 8 },
+    { name: 'Essie First Base', description: 'Base coat for long-lasting wear', sku: 'ESS-FB-001', category: 'Nail Care', brand: 'Essie', costPrice: 4, retailPrice: 10, quantity: 20, minQuantity: 5 },
+    { name: 'OPI Top Coat', description: 'High shine top coat', sku: 'OPI-TC-001', category: 'Nail Care', brand: 'OPI', costPrice: 5, retailPrice: 12, quantity: 18, minQuantity: 5 },
+    { name: 'Burt\'s Bees Hand Cream', description: 'Natural moisturizing hand cream', sku: 'BB-HC-001', category: 'Hand Care', brand: 'Burt\'s Bees', costPrice: 6, retailPrice: 14, quantity: 15, minQuantity: 5 },
+    { name: 'CND Cuticle Eraser', description: 'Gentle cuticle remover', sku: 'CND-CE-001', category: 'Nail Care', brand: 'CND', costPrice: 7, retailPrice: 15, quantity: 12, minQuantity: 4 },
+    { name: 'Deborah Lippmann Base Coat', description: 'Premium base coat', sku: 'DL-BC-001', category: 'Nail Care', brand: 'Deborah Lippmann', costPrice: 10, retailPrice: 22, quantity: 8, minQuantity: 3 },
+    { name: 'Seche Vite Fast Dry', description: 'Quick dry top coat', sku: 'SV-FD-001', category: 'Nail Care', brand: 'Seche', costPrice: 4, retailPrice: 10, quantity: 22, minQuantity: 6 },
+    { name: 'Zoya Remove+', description: 'Gentle nail polish remover', sku: 'ZO-RP-001', category: 'Nail Care', brand: 'Zoya', costPrice: 5, retailPrice: 12, quantity: 16, minQuantity: 5 },
+    { name: 'Tweezerman Cuticle Pusher', description: 'Professional cuticle tool', sku: 'TW-CP-001', category: 'Tools', brand: 'Tweezerman', costPrice: 8, retailPrice: 18, quantity: 10, minQuantity: 3 },
+    { name: 'Sally Hansen Hard as Nails', description: 'Nail hardening treatment', sku: 'SH-HN-001', category: 'Nail Care', brand: 'Sally Hansen', costPrice: 3, retailPrice: 8, quantity: 28, minQuantity: 8 },
+    { name: 'Nail File Set (3pc)', description: 'Professional nail files', sku: 'NF-SET-001', category: 'Tools', brand: 'Generic', costPrice: 4, retailPrice: 10, quantity: 35, minQuantity: 10 },
+    { name: 'Hand Sanitizer Travel Size', description: 'Portable hand sanitizer', sku: 'HS-TS-001', category: 'Care', brand: 'Generic', costPrice: 2, retailPrice: 5, quantity: 50, minQuantity: 15 },
+    { name: 'Foot Cream Luxe', description: 'Intensive foot moisturizer', sku: 'FC-LX-001', category: 'Foot Care', brand: 'Luxe', costPrice: 8, retailPrice: 18, quantity: 14, minQuantity: 4 },
+    { name: 'Callus Remover Gel', description: 'Professional callus treatment', sku: 'CR-GEL-001', category: 'Foot Care', brand: 'ProFoot', costPrice: 6, retailPrice: 14, quantity: 12, minQuantity: 4 },
+    { name: 'Paraffin Wax Refill', description: 'Lavender scented paraffin', sku: 'PW-LAV-001', category: 'Treatment', brand: 'GiGi', costPrice: 12, retailPrice: 25, quantity: 8, minQuantity: 3 },
+    { name: 'Cuticle Oil Pen', description: 'Easy application cuticle oil', sku: 'CO-PEN-001', category: 'Nail Care', brand: 'OPI', costPrice: 6, retailPrice: 14, quantity: 20, minQuantity: 6 },
+    { name: 'Nail Art Stickers', description: 'Decorative nail stickers set', sku: 'NA-STK-001', category: 'Nail Art', brand: 'Dashing Diva', costPrice: 3, retailPrice: 8, quantity: 40, minQuantity: 12 },
+    { name: 'Toe Separators (Gel)', description: 'Reusable gel toe separators', sku: 'TS-GEL-001', category: 'Tools', brand: 'Generic', costPrice: 4, retailPrice: 10, quantity: 25, minQuantity: 8 },
+    { name: 'UV Lamp Replacement', description: 'LED UV lamp bulb', sku: 'UV-REP-001', category: 'Equipment', brand: 'SunUV', costPrice: 15, retailPrice: 35, quantity: 6, minQuantity: 2 },
+  ];
+  const retailProducts = await Promise.all(
+    retailProductsData.map(p => prisma.retailProduct.create({ data: { salonId: salon.id, ...p } }))
+  );
+  console.log('Created', retailProducts.length, 'retail products');
+
+  // Retail Sales (20+ entries)
+  const retailSalesData = [];
+  for (let i = 0; i < 25; i++) {
+    const product = retailProducts[i % retailProducts.length];
+    retailSalesData.push({
+      salonId: salon.id,
+      productId: product.id,
+      clientId: i % 4 === 0 ? null : clients[i % clients.length].id,
+      soldById: technicians[i % technicians.length].id,
+      quantity: [1, 1, 2, 1, 3, 1, 1, 2][i % 8],
+      unitPrice: product.retailPrice,
+      totalPrice: product.retailPrice * [1, 1, 2, 1, 3, 1, 1, 2][i % 8],
+      createdAt: subDays(now, Math.floor(i / 2)),
+    });
+  }
+  await Promise.all(retailSalesData.map(s => prisma.retailSale.create({ data: s })));
+  console.log('Created', retailSalesData.length, 'retail sales');
+
+  // Service Packages (15+ entries)
+  const packagesData = [
+    { name: 'Bridal Package', description: 'Complete bridal nail care package', price: 120, validDays: 90, services: [{ serviceId: services[4].id, quantity: 2 }, { serviceId: services[14].id, quantity: 1 }] },
+    { name: 'Monthly Maintenance', description: 'Keep your nails perfect all month', price: 75, validDays: 30, services: [{ serviceId: services[4].id, quantity: 1 }, { serviceId: services[6].id, quantity: 1 }] },
+    { name: 'Spa Day Package', description: 'Ultimate relaxation package', price: 150, validDays: 60, services: [{ serviceId: services[14].id, quantity: 1 }, { serviceId: services[19].id, quantity: 1 }, { serviceId: services[21].id, quantity: 1 }] },
+    { name: 'New Client Special', description: 'Welcome package for first-timers', price: 45, validDays: 60, services: [{ serviceId: services[0].id, quantity: 1 }, { serviceId: services[12].id, quantity: 1 }] },
+    { name: 'Gel Lovers Bundle', description: 'For gel manicure enthusiasts', price: 140, validDays: 90, services: [{ serviceId: services[4].id, quantity: 3 }] },
+    { name: 'Pedicure Paradise', description: 'Three luxurious pedicures', price: 130, validDays: 90, services: [{ serviceId: services[13].id, quantity: 3 }] },
+    { name: 'VIP Experience', description: 'Premium services bundle', price: 200, validDays: 120, services: [{ serviceId: services[2].id, quantity: 2 }, { serviceId: services[14].id, quantity: 2 }] },
+    { name: 'Acrylic Full Set Bundle', description: 'Full set with fills', price: 100, validDays: 60, services: [{ serviceId: services[8].id, quantity: 1 }, { serviceId: services[9].id, quantity: 2 }] },
+    { name: 'Quick Fix Package', description: 'For busy professionals', price: 35, validDays: 30, services: [{ serviceId: services[3].id, quantity: 2 }] },
+    { name: 'Holiday Special', description: 'Festive nail care package', price: 85, validDays: 45, services: [{ serviceId: services[5].id, quantity: 1 }, { serviceId: services[18].id, quantity: 4 }] },
+    { name: 'Couples Package', description: 'Perfect for couples', price: 110, validDays: 60, services: [{ serviceId: services[0].id, quantity: 2 }, { serviceId: services[12].id, quantity: 2 }] },
+    { name: 'Student Special', description: 'Affordable care for students', price: 55, validDays: 60, services: [{ serviceId: services[0].id, quantity: 2 }, { serviceId: services[12].id, quantity: 1 }] },
+    { name: 'Executive Package', description: 'Premium men\'s grooming', price: 90, validDays: 60, services: [{ serviceId: services[26].id, quantity: 2 }, { serviceId: services[28].id, quantity: 2 }] },
+    { name: 'Summer Ready', description: 'Get summer ready nails', price: 95, validDays: 45, services: [{ serviceId: services[15].id, quantity: 1 }, { serviceId: services[17].id, quantity: 5 }] },
+    { name: 'Loyalty Reward Package', description: 'Special for loyal customers', price: 160, validDays: 90, services: [{ serviceId: services[4].id, quantity: 2 }, { serviceId: services[14].id, quantity: 2 }] },
+  ];
+  const servicePackages = [];
+  for (const pkg of packagesData) {
+    const { services: pkgServices, ...pkgData } = pkg;
+    const created = await prisma.servicePackage.create({
+      data: { salonId: salon.id, ...pkgData },
+    });
+    for (const svc of pkgServices) {
+      await prisma.packageService.create({
+        data: { packageId: created.id, serviceId: svc.serviceId, quantity: svc.quantity },
+      });
+    }
+    servicePackages.push(created);
+  }
+  console.log('Created', servicePackages.length, 'service packages');
+
+  // Package Sales (15+ entries)
+  for (let i = 0; i < 18; i++) {
+    const pkg = servicePackages[i % servicePackages.length];
+    const remainingServices: Record<string, number> = {};
+    await prisma.packageSale.create({
+      data: {
+        salonId: salon.id,
+        packageId: pkg.id,
+        clientId: clients[i % clients.length].id,
+        amountPaid: pkg.price,
+        expiresAt: addDays(now, pkg.validDays),
+        servicesRemaining: remainingServices,
+        purchaseDate: subDays(now, i * 3),
+      },
+    });
+  }
+  console.log('Created 18 package sales');
+
+  // Membership Plans (5+ plans)
+  const membershipPlansData = [
+    { name: 'Bronze Member', description: 'Basic membership benefits', monthlyPrice: 29.99, annualPrice: 299.99, benefits: ['5% off all services', 'Priority booking', 'Birthday discount'], discountPercent: 5 },
+    { name: 'Silver Member', description: 'Enhanced membership benefits', monthlyPrice: 49.99, annualPrice: 499.99, benefits: ['10% off all services', 'Priority booking', 'Birthday discount', '1 free manicure/month', 'Exclusive member events'], discountPercent: 10 },
+    { name: 'Gold Member', description: 'Premium membership benefits', monthlyPrice: 79.99, annualPrice: 799.99, benefits: ['15% off all services', 'VIP priority booking', 'Birthday discount', '2 free services/month', 'Exclusive member events', 'Free product samples'], discountPercent: 15 },
+    { name: 'Platinum Member', description: 'Ultimate membership benefits', monthlyPrice: 129.99, annualPrice: 1199.99, benefits: ['20% off all services', 'VIP priority booking', 'Birthday discount', '4 free services/month', 'Exclusive VIP events', 'Free product samples', 'Complimentary drinks'], discountPercent: 20 },
+    { name: 'Corporate Plan', description: 'For corporate clients', monthlyPrice: 199.99, annualPrice: 1999.99, benefits: ['15% off for all employees', 'Group booking discounts', 'Corporate events'], discountPercent: 15 },
+  ];
+  const membershipPlans = await Promise.all(
+    membershipPlansData.map(p => prisma.membershipPlan.create({ data: { salonId: salon.id, ...p } }))
+  );
+  console.log('Created', membershipPlans.length, 'membership plans');
+
+  // Memberships (20+ members)
+  const membershipsData = [];
+  for (let i = 0; i < 22; i++) {
+    membershipsData.push({
+      salonId: salon.id,
+      planId: membershipPlans[i % membershipPlans.length].id,
+      clientId: clients[i % clients.length].id,
+      status: i < 15 ? MembershipStatus.ACTIVE : i < 18 ? MembershipStatus.PAUSED : MembershipStatus.CANCELLED,
+      billingCycle: i % 3 === 0 ? BillingCycle.ANNUAL : BillingCycle.MONTHLY,
+      startDate: subDays(now, 30 + i * 10),
+      nextBillDate: addDays(now, 30 - (i % 30)),
+      servicesUsed: {},
+    });
+  }
+  await Promise.all(membershipsData.map(m => prisma.membership.create({ data: m })));
+  console.log('Created', membershipsData.length, 'memberships');
+
+  // Time-Off Requests (15+ entries)
+  const timeOffData = [];
+  for (let i = 0; i < 18; i++) {
+    const daysFromNow = [10, 20, -5, 30, -10, 15, 25, 40, -3, 7][i % 10];
+    timeOffData.push({
+      salonId: salon.id,
+      technicianId: technicians[i % technicians.length].id,
+      startDate: addDays(now, daysFromNow),
+      endDate: addDays(now, daysFromNow + [3, 5, 2, 7, 1, 4, 2, 3, 1, 5][i % 10]),
+      reason: ['Vacation', 'Personal', 'Medical', 'Family event', 'Training', 'Sick leave'][i % 6],
+      status: i < 6 ? TimeOffStatus.APPROVED : i < 12 ? TimeOffStatus.PENDING : i < 15 ? TimeOffStatus.DENIED : TimeOffStatus.CANCELLED,
+      approvedById: i < 6 ? users[0].id : null,
+      approvedAt: i < 6 ? subDays(now, 5) : null,
+    });
+  }
+  await Promise.all(timeOffData.map(t => prisma.timeOffRequest.create({ data: t })));
+  console.log('Created', timeOffData.length, 'time-off requests');
+
+  // Technician Skills (25+ entries)
+  const skillsData = [
+    { skillName: 'Gel Manicure', level: SkillLevel.EXPERT },
+    { skillName: 'Acrylic Nails', level: SkillLevel.ADVANCED },
+    { skillName: 'Nail Art', level: SkillLevel.EXPERT },
+    { skillName: 'Pedicure', level: SkillLevel.ADVANCED },
+    { skillName: 'French Tips', level: SkillLevel.EXPERT },
+    { skillName: 'Chrome Nails', level: SkillLevel.INTERMEDIATE },
+    { skillName: 'Dip Powder', level: SkillLevel.ADVANCED },
+    { skillName: 'Paraffin Treatment', level: SkillLevel.ADVANCED },
+    { skillName: 'Nail Repair', level: SkillLevel.EXPERT },
+    { skillName: 'Barbering', level: SkillLevel.ADVANCED },
+  ];
+  const techSkills = [];
+  for (const tech of technicians) {
+    const numSkills = 4 + Math.floor(Math.random() * 4); // 4-7 skills per tech
+    for (let i = 0; i < numSkills && i < skillsData.length; i++) {
+      techSkills.push({
+        salonId: salon.id,
+        technicianId: tech.id,
+        skillName: skillsData[i].skillName,
+        level: skillsData[i].level,
+        certified: i < 3,
+        certExpiry: i < 3 ? addDays(now, 365 * (1 + i)) : null,
+        notes: i === 0 ? 'Specialty skill' : null,
+      });
+    }
+  }
+  await Promise.all(techSkills.map(s => prisma.technicianSkill.create({ data: s })));
+  console.log('Created', techSkills.length, 'technician skills');
+
+  // Stations (15 stations)
+  const stationsData = [
+    { name: 'Station 1', type: 'nail' },
+    { name: 'Station 2', type: 'nail' },
+    { name: 'Station 3', type: 'nail' },
+    { name: 'Station 4', type: 'nail' },
+    { name: 'Station 5', type: 'nail' },
+    { name: 'Station 6', type: 'nail' },
+    { name: 'Pedicure Chair 1', type: 'pedicure' },
+    { name: 'Pedicure Chair 2', type: 'pedicure' },
+    { name: 'Pedicure Chair 3', type: 'pedicure' },
+    { name: 'Pedicure Chair 4', type: 'pedicure' },
+    { name: 'Barber Chair 1', type: 'barber' },
+    { name: 'Barber Chair 2', type: 'barber' },
+    { name: 'VIP Room', type: 'vip' },
+    { name: 'Spa Room 1', type: 'spa' },
+    { name: 'Spa Room 2', type: 'spa' },
+  ];
+  const stations = await Promise.all(
+    stationsData.map(s => prisma.station.create({ data: { salonId: salon.id, ...s } }))
+  );
+  console.log('Created', stations.length, 'stations');
+
+  // Station Assignments (20+ entries)
+  for (let i = 0; i < 24; i++) {
+    await prisma.stationAssignment.create({
+      data: {
+        stationId: stations[i % stations.length].id,
+        technicianId: technicians[i % technicians.length].id,
+        dayOfWeek: i % 7,
+        startTime: '09:00',
+        endTime: '17:00',
+      },
+    });
+  }
+  console.log('Created 24 station assignments');
+
+  // Client Families (10 families)
+  const familiesData = ['The Martinez Family', 'The Wong Family', 'The Pham Family', 'The Smith Family', 'The Nguyen Family',
+                        'The Lee Family', 'The Chen Family', 'The Garcia Family', 'The Kim Family', 'The Brown Family'];
+  const clientFamilies = await Promise.all(
+    familiesData.map(name => prisma.clientFamily.create({ data: { salonId: salon.id, name } }))
+  );
+  // Update some clients to belong to families
+  for (let i = 0; i < 20; i++) {
+    await prisma.client.update({
+      where: { id: clients[i].id },
+      data: { familyId: clientFamilies[Math.floor(i / 2)].id },
+    });
+  }
+  console.log('Created', clientFamilies.length, 'client families');
+
+  // Referrals (20+ entries)
+  const referralsData = [];
+  for (let i = 0; i < 22; i++) {
+    referralsData.push({
+      salonId: salon.id,
+      referrerId: clients[i % 15].id,
+      referredId: clients[15 + (i % (clients.length - 15))].id,
+      status: i < 8 ? ReferralStatus.REWARDED : i < 14 ? ReferralStatus.QUALIFIED : ReferralStatus.PENDING,
+      rewardType: 'points',
+      rewardValue: 100,
+      rewardGivenAt: i < 8 ? subDays(now, i * 2) : null,
+      createdAt: subDays(now, 30 + i * 3),
+    });
+  }
+  // Only create unique referrals (one per referred client)
+  const uniqueReferrals = referralsData.filter((r, i, arr) =>
+    arr.findIndex(x => x.referredId === r.referredId) === i
+  );
+  await Promise.all(uniqueReferrals.map(r => prisma.referral.create({ data: r })));
+  console.log('Created', uniqueReferrals.length, 'referrals');
+
+  console.log('\n--- New Features Seeding Complete ---\n');
 
   // ============================================================
   // SECOND SALON: Glamour Nails - Downtown Location

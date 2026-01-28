@@ -187,22 +187,39 @@ model Salon {
   chatMessages             ChatMessage[]
   reviews                  Review[]
   noShowPredictions        NoShowPrediction[]
+  // New feature relations
+  servicePricings          ServicePricing[]
+  commissions              Commission[]
+  commissionRules          CommissionRule[]
+  retailProducts           RetailProduct[]
+  retailSales              RetailSale[]
+  servicePackages          ServicePackage[]
+  packageSales             PackageSale[]
+  membershipPlans          MembershipPlan[]
+  memberships              Membership[]
+  timeOffRequests          TimeOffRequest[]
+  technicianSkills         TechnicianSkill[]
+  stations                 Station[]
+  clientFamilies           ClientFamily[]
+  referrals                Referral[]
 
   @@index([email])
 }
 
 model User {
-  id                String   @id @default(cuid())
+  id                String            @id @default(cuid())
   salonId           String
   name              String
-  email             String   @unique
+  email             String            @unique
   hashedPassword    String
   role              UserRole
   phone             String?
-  active            Boolean  @default(true)
-  preferredLanguage String   @default("en")
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  active            Boolean           @default(true)
+  preferredLanguage String            @default("en")
+  level             TechnicianLevel?  // For pricing tiers
+  imageUrl          String?           // Profile photo
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   // Relations
   salon                 Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
@@ -214,6 +231,14 @@ model User {
   tips                  Tip[]
   galleryPhotos         GalleryPhoto[]
   recurringAppointments RecurringAppointment[] @relation("RecurringTechnician")
+  // New feature relations
+  commissions           Commission[]           @relation("TechnicianCommissions")
+  commissionRules       CommissionRule[]       @relation("TechnicianCommissionRules")
+  retailSales           RetailSale[]           @relation("SalesByUser")
+  timeOffRequests       TimeOffRequest[]       @relation("TechnicianTimeOff")
+  approvedTimeOff       TimeOffRequest[]       @relation("ApprovedTimeOff")
+  skills                TechnicianSkill[]      @relation("TechnicianSkills")
+  stationAssignments    StationAssignment[]    @relation("StationAssignments")
 
   @@index([salonId])
   @@index([email])
@@ -229,6 +254,7 @@ model Service {
   durationMinutes Int
   basePrice       Float
   active          Boolean         @default(true)
+  imageUrl        String?         // Service image
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
@@ -237,6 +263,10 @@ model Service {
   appointments          Appointment[]
   addons                ServiceAddon[]
   recurringAppointments RecurringAppointment[]
+  // New feature relations
+  pricingTiers          ServicePricing[]
+  appointmentServices   AppointmentService[]   @relation("AppointmentServices")
+  packageServices       PackageService[]
 
   @@index([salonId])
   @@index([active])
@@ -254,12 +284,17 @@ model Client {
   marketingOptIn    Boolean  @default(true)
   birthday          DateTime?
   notes             String?
+  // New fields for missing features
+  allergies         String?  // Allergies/sensitivities
+  referralSource    String?  // How they found us
+  familyId          String?  // Link to family/household
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   // Relations
   salon                 Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
   preferredTech         User?                  @relation("PreferredTechnician", fields: [preferredTechId], references: [id], onDelete: SetNull)
+  family                ClientFamily?          @relation("FamilyMembers", fields: [familyId], references: [id], onDelete: SetNull)
   appointments          Appointment[]
   visits                Visit[]
   loyaltyAccount        LoyaltyAccount?
@@ -271,11 +306,18 @@ model Client {
   recurringAppointments RecurringAppointment[]
   chatMessages          ChatMessage[]
   reviews               Review[]
+  // New feature relations
+  retailSales           RetailSale[]
+  packageSales          PackageSale[]
+  memberships           Membership[]
+  referralsGiven        Referral[]             @relation("ReferredBy")
+  referredBy            Referral?              @relation("ReferredClients")
 
   @@index([salonId])
   @@index([phone])
   @@index([email])
   @@index([preferredTechId])
+  @@index([familyId])
 }
 
 model Appointment {
@@ -291,6 +333,7 @@ model Appointment {
   notes        String?
   depositPaid  Boolean           @default(false)
   depositAmount Float?
+  groupId      String?           // For group appointments
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 
@@ -304,6 +347,8 @@ model Appointment {
   tip              Tip?
   review           Review?
   noShowPrediction NoShowPrediction?
+  // New feature relations
+  services         AppointmentService[] // Multi-service booking
 
   @@index([salonId])
   @@index([clientId])
@@ -311,6 +356,7 @@ model Appointment {
   @@index([serviceId])
   @@index([startTime])
   @@index([status])
+  @@index([groupId])
 }
 
 model Visit {
@@ -583,6 +629,8 @@ model Payment {
   appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   giftCard    GiftCard?    @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
+  // New feature relations
+  splits      PaymentSplit[] // For split payments
 
   @@index([salonId])
   @@index([appointmentId])
@@ -850,4 +898,411 @@ enum NotificationType {
   WEBSOCKET
   EMAIL
   SMS
+}
+
+// ============ NEW MISSING FEATURES ============
+
+// Multi-service booking - Junction table for appointments with multiple services
+model AppointmentService {
+  id            String   @id @default(cuid())
+  appointmentId String
+  serviceId     String
+  price         Float    // Price at time of booking
+  duration      Int      // Duration in minutes
+  order         Int      @default(0) // Order of services
+  createdAt     DateTime @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  service     Service     @relation("AppointmentServices", fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@index([serviceId])
+}
+
+// Pricing tiers by technician level
+enum TechnicianLevel {
+  JUNIOR
+  SENIOR
+  MASTER
+  SPECIALIST
+}
+
+model ServicePricing {
+  id         String          @id @default(cuid())
+  salonId    String
+  serviceId  String
+  level      TechnicianLevel
+  price      Float
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  salon   Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, level])
+  @@index([salonId])
+  @@index([serviceId])
+}
+
+// Split payments - Multiple payment methods for one transaction
+model PaymentSplit {
+  id        String        @id @default(cuid())
+  paymentId String
+  method    PaymentMethod
+  amount    Float
+  reference String?       // Card last 4, gift card code, etc.
+  createdAt DateTime      @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+}
+
+// Commission tracking
+model Commission {
+  id           String         @id @default(cuid())
+  salonId      String
+  technicianId String
+  appointmentId String?
+  serviceAmount Float         // Service revenue
+  productAmount Float         @default(0) // Product revenue
+  tipAmount    Float          @default(0)
+  commissionRate Float        // Percentage (e.g., 0.45 for 45%)
+  commissionAmount Float      // Calculated commission
+  period       String         // e.g., "2024-01" for monthly
+  status       CommissionStatus @default(PENDING)
+  paidAt       DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  technician User  @relation("TechnicianCommissions", fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([technicianId])
+  @@index([period])
+  @@index([status])
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+}
+
+// Commission rules per technician
+model CommissionRule {
+  id           String  @id @default(cuid())
+  salonId      String
+  technicianId String
+  serviceRate  Float   @default(0.45) // 45% default
+  productRate  Float   @default(0.10) // 10% on products
+  tipRate      Float   @default(1.0)  // 100% of tips
+  active       Boolean @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  technician User  @relation("TechnicianCommissionRules", fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@unique([technicianId])
+  @@index([salonId])
+}
+
+// Retail product sales
+model RetailProduct {
+  id          String   @id @default(cuid())
+  salonId     String
+  name        String
+  description String?
+  sku         String?
+  barcode     String?
+  category    String?
+  brand       String?
+  costPrice   Float
+  retailPrice Float
+  quantity    Int      @default(0)
+  minQuantity Int      @default(5)
+  imageUrl    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  salon Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  sales RetailSale[]
+
+  @@unique([salonId, sku])
+  @@index([salonId])
+  @@index([category])
+  @@index([barcode])
+}
+
+model RetailSale {
+  id          String   @id @default(cuid())
+  salonId     String
+  productId   String
+  clientId    String?
+  soldById    String?  // Staff who made the sale
+  quantity    Int
+  unitPrice   Float
+  totalPrice  Float
+  paymentId   String?
+  createdAt   DateTime @default(now())
+
+  salon   Salon         @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  product RetailProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  client  Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  soldBy  User?         @relation("SalesByUser", fields: [soldById], references: [id], onDelete: SetNull)
+
+  @@index([salonId])
+  @@index([productId])
+  @@index([clientId])
+  @@index([createdAt])
+}
+
+// Service packages (bundles)
+model ServicePackage {
+  id          String   @id @default(cuid())
+  salonId     String
+  name        String
+  description String?
+  price       Float    // Discounted package price
+  validDays   Int      @default(365) // Days until expiry
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  salon    Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  services PackageService[]
+  sales    PackageSale[]
+
+  @@index([salonId])
+  @@index([active])
+}
+
+model PackageService {
+  id        String @id @default(cuid())
+  packageId String
+  serviceId String
+  quantity  Int    @default(1) // How many of this service included
+
+  package ServicePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  service Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([packageId, serviceId])
+  @@index([packageId])
+  @@index([serviceId])
+}
+
+model PackageSale {
+  id          String    @id @default(cuid())
+  salonId     String
+  packageId   String
+  clientId    String
+  purchaseDate DateTime @default(now())
+  expiresAt   DateTime
+  amountPaid  Float
+  servicesRemaining Json // Track remaining services
+
+  salon   Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  package ServicePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  client  Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([packageId])
+  @@index([clientId])
+  @@index([expiresAt])
+}
+
+// Membership plans
+model MembershipPlan {
+  id             String   @id @default(cuid())
+  salonId        String
+  name           String
+  description    String?
+  monthlyPrice   Float
+  annualPrice    Float?   // Optional annual pricing
+  benefits       Json     // Array of benefit descriptions
+  discountPercent Float   @default(0) // Discount on services
+  freeServices   Json?    // e.g., {"manicure": 2, "pedicure": 1} per month
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+
+  @@index([salonId])
+  @@index([active])
+}
+
+model Membership {
+  id           String           @id @default(cuid())
+  salonId      String
+  planId       String
+  clientId     String
+  status       MembershipStatus @default(ACTIVE)
+  startDate    DateTime         @default(now())
+  endDate      DateTime?
+  billingCycle BillingCycle     @default(MONTHLY)
+  nextBillDate DateTime?
+  servicesUsed Json?            // Track used free services this period
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  salon  Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  plan   MembershipPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  client Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([planId])
+  @@index([clientId])
+  @@index([status])
+}
+
+enum MembershipStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+// Time-off requests
+model TimeOffRequest {
+  id           String            @id @default(cuid())
+  salonId      String
+  technicianId String
+  startDate    DateTime
+  endDate      DateTime
+  reason       String?
+  status       TimeOffStatus     @default(PENDING)
+  approvedById String?
+  approvedAt   DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  technician User  @relation("TechnicianTimeOff", fields: [technicianId], references: [id], onDelete: Cascade)
+  approvedBy User? @relation("ApprovedTimeOff", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([salonId])
+  @@index([technicianId])
+  @@index([status])
+  @@index([startDate])
+}
+
+enum TimeOffStatus {
+  PENDING
+  APPROVED
+  DENIED
+  CANCELLED
+}
+
+// Technician skills/certifications
+model TechnicianSkill {
+  id           String    @id @default(cuid())
+  salonId      String
+  technicianId String
+  skillName    String
+  level        SkillLevel @default(INTERMEDIATE)
+  certified    Boolean   @default(false)
+  certExpiry   DateTime?
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  technician User  @relation("TechnicianSkills", fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@unique([technicianId, skillName])
+  @@index([salonId])
+  @@index([technicianId])
+}
+
+enum SkillLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  EXPERT
+}
+
+// Stations/Chairs
+model Station {
+  id        String   @id @default(cuid())
+  salonId   String
+  name      String   // e.g., "Chair 1", "Station A"
+  type      String?  // e.g., "nail", "hair", "spa"
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  salon       Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  assignments StationAssignment[]
+
+  @@unique([salonId, name])
+  @@index([salonId])
+}
+
+model StationAssignment {
+  id           String   @id @default(cuid())
+  stationId    String
+  technicianId String
+  dayOfWeek    Int?     // null = all days
+  startTime    String?  // null = all day
+  endTime      String?
+  createdAt    DateTime @default(now())
+
+  station    Station @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  technician User    @relation("StationAssignments", fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@index([stationId])
+  @@index([technicianId])
+}
+
+// Family/household linking for clients
+model ClientFamily {
+  id        String   @id @default(cuid())
+  salonId   String
+  name      String   // Family name, e.g., "The Smiths"
+  createdAt DateTime @default(now())
+
+  salon   Salon    @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  members Client[] @relation("FamilyMembers")
+
+  @@index([salonId])
+}
+
+// Referral tracking
+model Referral {
+  id             String        @id @default(cuid())
+  salonId        String
+  referrerId     String        // Client who referred
+  referredId     String        // New client
+  status         ReferralStatus @default(PENDING)
+  rewardType     String?       // e.g., "points", "discount", "free_service"
+  rewardValue    Float?
+  rewardGivenAt  DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  salon    Salon  @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  referrer Client @relation("ReferredBy", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred Client @relation("ReferredClients", fields: [referredId], references: [id], onDelete: Cascade)
+
+  @@unique([referredId]) // Each client can only be referred once
+  @@index([salonId])
+  @@index([referrerId])
+  @@index([status])
+}
+
+enum ReferralStatus {
+  PENDING
+  QUALIFIED   // Referred client made first purchase
+  REWARDED    // Reward given to referrer
+  EXPIRED
 }
