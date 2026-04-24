@@ -23,13 +23,16 @@ import {
   Chip,
   FormControlLabel,
   Switch,
-  CircularProgress,
   Alert,
   ImageList,
   ImageListItem,
   ImageListItemBar,
   Tabs,
   Tab,
+  Drawer,
+  Divider,
+  Checkbox,
+  Paper,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -40,7 +43,13 @@ import {
   PhotoCamera as PhotoIcon,
   CloudUpload as UploadIcon,
   Link as LinkIcon,
+  Close as CloseIcon,
+  CheckBox as CheckBoxIcon,
+  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon,
 } from '@mui/icons-material';
+import { useToast } from '@/components/ToastProvider';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { CardsSkeleton } from '@/components/LoadingSkeleton';
 
 interface Technician {
   id: string;
@@ -76,6 +85,8 @@ const COMMON_TAGS = [
 ];
 
 export default function GalleryPage() {
+  const { showSuccess, showError } = useToast();
+
   const [photos, setPhotos] = useState<GalleryPhoto[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,14 +108,24 @@ export default function GalleryPage() {
     featured: false,
   });
 
-  // Preview dialog
-  const [previewPhoto, setPreviewPhoto] = useState<GalleryPhoto | null>(null);
+  // Detail Drawer state (replaces preview dialog)
+  const [drawerPhoto, setDrawerPhoto] = useState<GalleryPhoto | null>(null);
 
   // Upload state
   const [uploadMethod, setUploadMethod] = useState<'upload' | 'url'>('upload');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+
+  // Confirm dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  // Bulk select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     fetchPhotos();
@@ -121,7 +142,7 @@ export default function GalleryPage() {
       const data = await res.json();
       setPhotos(data.photos || []);
     } catch {
-      setError('Failed to load gallery');
+      showError('Failed to load gallery');
     } finally {
       setLoading(false);
     }
@@ -133,7 +154,7 @@ export default function GalleryPage() {
       const data = await res.json();
       setTechnicians(data.technicians || []);
     } catch {
-      console.error('Failed to fetch technicians');
+      showError('Failed to fetch technicians');
     }
   };
 
@@ -199,7 +220,7 @@ export default function GalleryPage() {
       const data = await res.json();
       return data.imageUrl;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to upload file');
+      showError(err instanceof Error ? err.message : 'Failed to upload file');
       return null;
     } finally {
       setUploading(false);
@@ -213,7 +234,7 @@ export default function GalleryPage() {
       // If uploading a file, upload it first
       if (uploadMethod === 'upload' && selectedFile && !editingPhoto) {
         const uploadedUrl = await uploadFile();
-        if (!uploadedUrl) return; // Error already set
+        if (!uploadedUrl) return; // Error already shown via toast
         imageUrl = uploadedUrl;
       }
 
@@ -229,9 +250,10 @@ export default function GalleryPage() {
       if (!res.ok) throw new Error('Failed to save');
 
       setDialogOpen(false);
+      showSuccess(editingPhoto ? 'Photo updated successfully' : 'Photo added successfully');
       fetchPhotos();
     } catch {
-      setError('Failed to save photo');
+      showError('Failed to save photo');
     }
   };
 
@@ -242,21 +264,93 @@ export default function GalleryPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ featured: !photo.featured }),
       });
+      showSuccess(photo.featured ? 'Removed from featured' : 'Added to featured');
       fetchPhotos();
     } catch {
-      setError('Failed to update photo');
+      showError('Failed to update photo');
     }
   };
 
-  const handleDelete = async (photoId: string) => {
-    if (!confirm('Are you sure you want to delete this photo?')) return;
+  // Single delete: open confirm dialog
+  const handleDeleteRequest = (photoId: string) => {
+    setPendingDeleteId(photoId);
+    setConfirmOpen(true);
+  };
 
+  // Single delete: confirmed
+  const handleDeleteConfirm = async () => {
+    if (!pendingDeleteId) return;
+    setConfirmLoading(true);
     try {
-      await fetch(`/api/gallery/${photoId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/gallery/${pendingDeleteId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete');
+      showSuccess('Photo deleted successfully');
+      // Close drawer if the deleted photo was being viewed
+      if (drawerPhoto && drawerPhoto.id === pendingDeleteId) {
+        setDrawerPhoto(null);
+      }
+      // Remove from selection if selected
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(pendingDeleteId);
+        return next;
+      });
       fetchPhotos();
     } catch {
-      setError('Failed to delete photo');
+      showError('Failed to delete photo');
+    } finally {
+      setConfirmLoading(false);
+      setConfirmOpen(false);
+      setPendingDeleteId(null);
     }
+  };
+
+  // Bulk delete: open confirm dialog
+  const handleBulkDeleteRequest = () => {
+    setBulkConfirmOpen(true);
+  };
+
+  // Bulk delete: confirmed
+  const handleBulkDeleteConfirm = async () => {
+    setBulkDeleting(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await fetch('/api/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, type: 'gallery' }),
+      });
+      if (!res.ok) throw new Error('Bulk delete failed');
+      showSuccess(`${ids.length} photo${ids.length !== 1 ? 's' : ''} deleted successfully`);
+      // Close drawer if the viewed photo was in the bulk delete set
+      if (drawerPhoto && selectedIds.has(drawerPhoto.id)) {
+        setDrawerPhoto(null);
+      }
+      setSelectedIds(new Set());
+      fetchPhotos();
+    } catch {
+      showError('Failed to delete selected photos');
+    } finally {
+      setBulkDeleting(false);
+      setBulkConfirmOpen(false);
+    }
+  };
+
+  // Bulk select helpers
+  const toggleSelect = (photoId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(photoId)) {
+        next.delete(photoId);
+      } else {
+        next.add(photoId);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
   };
 
   const toggleTag = (tag: string) => {
@@ -270,8 +364,8 @@ export default function GalleryPage() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-        <CircularProgress />
+      <Box sx={{ p: 4 }}>
+        <CardsSkeleton count={8} />
       </Box>
     );
   }
@@ -289,6 +383,41 @@ export default function GalleryPage() {
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
           {error}
         </Alert>
+      )}
+
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <Paper
+          elevation={3}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            px: 3,
+            py: 1.5,
+            mb: 3,
+            bgcolor: 'primary.50',
+            borderLeft: 4,
+            borderColor: 'primary.main',
+          }}
+        >
+          <Typography variant="body1" fontWeight={600}>
+            {selectedIds.size} photo{selectedIds.size !== 1 ? 's' : ''} selected
+          </Typography>
+          <Box sx={{ flex: 1 }} />
+          <Button variant="outlined" size="small" onClick={clearSelection}>
+            Clear Selection
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            size="small"
+            startIcon={<DeleteIcon />}
+            onClick={handleBulkDeleteRequest}
+          >
+            Delete Selected
+          </Button>
+        </Paper>
       )}
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
@@ -339,9 +468,32 @@ export default function GalleryPage() {
                 '&:hover': { opacity: 0.9 },
                 borderRadius: 2,
                 overflow: 'hidden',
+                position: 'relative',
               }}
-              onClick={() => setPreviewPhoto(photo)}
+              onClick={() => setDrawerPhoto(photo)}
             >
+              {/* Bulk select checkbox */}
+              <Checkbox
+                checked={selectedIds.has(photo.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSelect(photo.id);
+                }}
+                icon={<CheckBoxOutlineBlankIcon />}
+                checkedIcon={<CheckBoxIcon />}
+                sx={{
+                  position: 'absolute',
+                  top: 4,
+                  left: 4,
+                  zIndex: 2,
+                  color: 'rgba(255,255,255,0.8)',
+                  '&.Mui-checked': { color: 'primary.main' },
+                  bgcolor: 'rgba(0,0,0,0.3)',
+                  borderRadius: 1,
+                  p: 0.5,
+                  '&:hover': { bgcolor: 'rgba(0,0,0,0.5)' },
+                }}
+              />
               <img
                 src={photo.thumbnailUrl || photo.imageUrl}
                 alt={photo.title || 'Nail art'}
@@ -368,7 +520,7 @@ export default function GalleryPage() {
         </ImageList>
       )}
 
-      {/* Add/Edit Dialog */}
+      {/* Add/Edit Dialog - KEPT AS IS */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{editingPhoto ? 'Edit Photo' : 'Add Photo'}</DialogTitle>
         <DialogContent>
@@ -518,64 +670,151 @@ export default function GalleryPage() {
         </DialogActions>
       </Dialog>
 
-      {/* Preview Dialog */}
-      <Dialog
-        open={!!previewPhoto}
-        onClose={() => setPreviewPhoto(null)}
-        maxWidth="md"
-        fullWidth
+      {/* Detail Drawer (replaces Preview Dialog) */}
+      <Drawer
+        anchor="right"
+        open={!!drawerPhoto}
+        onClose={() => setDrawerPhoto(null)}
+        PaperProps={{ sx: { width: 420, maxWidth: '100vw' } }}
       >
-        {previewPhoto && (
-          <>
-            <DialogContent sx={{ p: 0 }}>
-              <img
-                src={previewPhoto.imageUrl}
-                alt={previewPhoto.title || 'Nail art'}
-                style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain' }}
-              />
-            </DialogContent>
-            <Box sx={{ p: 2 }}>
-              <Typography variant="h6">{previewPhoto.title || 'Untitled'}</Typography>
-              <Typography color="text.secondary" gutterBottom>
-                by {previewPhoto.technician.name}
+        {drawerPhoto && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            {/* Drawer header */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 2, py: 1.5 }}>
+              <Typography variant="h6" noWrap sx={{ flex: 1 }}>
+                Photo Details
               </Typography>
-              {previewPhoto.description && (
-                <Typography variant="body2" sx={{ mb: 2 }}>
-                  {previewPhoto.description}
+              <IconButton onClick={() => setDrawerPhoto(null)}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
+            <Divider />
+
+            {/* Image preview */}
+            <Box sx={{ width: '100%', bgcolor: 'grey.100' }}>
+              <img
+                src={drawerPhoto.imageUrl}
+                alt={drawerPhoto.title || 'Nail art'}
+                style={{ width: '100%', maxHeight: 320, objectFit: 'contain', display: 'block' }}
+              />
+            </Box>
+
+            {/* Details */}
+            <Box sx={{ flex: 1, overflow: 'auto', p: 2.5 }}>
+              <Typography variant="h6" gutterBottom>
+                {drawerPhoto.title || 'Untitled'}
+              </Typography>
+
+              {drawerPhoto.description && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  {drawerPhoto.description}
                 </Typography>
               )}
-              {previewPhoto.tags.length > 0 && (
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-                  {previewPhoto.tags.map((tag) => (
-                    <Chip key={tag} label={tag} size="small" />
-                  ))}
+
+              <Divider sx={{ my: 2 }} />
+
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Typography variant="body2" color="text.secondary">Technician</Typography>
+                  <Typography variant="body2" fontWeight={500}>{drawerPhoto.technician.name}</Typography>
                 </Box>
-              )}
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  startIcon={<EditIcon />}
-                  onClick={() => {
-                    setPreviewPhoto(null);
-                    handleOpenDialog(previewPhoto);
-                  }}
-                >
-                  Edit
-                </Button>
-                <Button
-                  startIcon={<DeleteIcon />}
-                  color="error"
-                  onClick={() => {
-                    handleDelete(previewPhoto.id);
-                    setPreviewPhoto(null);
-                  }}
-                >
-                  Delete
-                </Button>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Typography variant="body2" color="text.secondary">Featured</Typography>
+                  <Chip
+                    label={drawerPhoto.featured ? 'Yes' : 'No'}
+                    size="small"
+                    color={drawerPhoto.featured ? 'warning' : 'default'}
+                    icon={drawerPhoto.featured ? <StarIcon /> : undefined}
+                  />
+                </Box>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Typography variant="body2" color="text.secondary">Created</Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {new Date(drawerPhoto.createdAt).toLocaleDateString(undefined, {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </Typography>
+                </Box>
               </Box>
+
+              {drawerPhoto.tags.length > 0 && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Tags
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {drawerPhoto.tags.map((tag) => (
+                      <Chip key={tag} label={tag} size="small" />
+                    ))}
+                  </Box>
+                </>
+              )}
             </Box>
-          </>
+
+            {/* Action buttons */}
+            <Divider />
+            <Box sx={{ display: 'flex', gap: 1, p: 2 }}>
+              <Button
+                variant="outlined"
+                startIcon={<EditIcon />}
+                fullWidth
+                onClick={() => {
+                  const photo = drawerPhoto;
+                  setDrawerPhoto(null);
+                  handleOpenDialog(photo);
+                }}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                fullWidth
+                onClick={() => {
+                  handleDeleteRequest(drawerPhoto.id);
+                }}
+              >
+                Delete
+              </Button>
+            </Box>
+          </Box>
         )}
-      </Dialog>
+      </Drawer>
+
+      {/* Single delete confirm dialog */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete Photo"
+        message="Are you sure you want to delete this photo? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        loading={confirmLoading}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setPendingDeleteId(null);
+        }}
+      />
+
+      {/* Bulk delete confirm dialog */}
+      <ConfirmDialog
+        open={bulkConfirmOpen}
+        title="Delete Selected Photos"
+        message={`Are you sure you want to delete ${selectedIds.size} selected photo${selectedIds.size !== 1 ? 's' : ''}? This action cannot be undone.`}
+        confirmText={`Delete ${selectedIds.size} Photo${selectedIds.size !== 1 ? 's' : ''}`}
+        cancelText="Cancel"
+        variant="danger"
+        loading={bulkDeleting}
+        onConfirm={handleBulkDeleteConfirm}
+        onCancel={() => setBulkConfirmOpen(false)}
+      />
     </Box>
   );
 }

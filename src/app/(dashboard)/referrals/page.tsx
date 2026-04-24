@@ -22,7 +22,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  CircularProgress,
   Grid,
   Card,
   CardContent,
@@ -33,6 +32,11 @@ import {
   ListItemAvatar,
   ListItemText,
   Avatar,
+  Drawer,
+  Divider,
+  Checkbox,
+  Toolbar,
+  alpha,
 } from '@mui/material';
 import {
   Add,
@@ -40,8 +44,14 @@ import {
   People,
   Star,
   TrendingUp,
+  Close,
+  Edit,
+  Delete,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
+import { useToast } from '@/components/ToastProvider';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { TableSkeleton } from '@/components/LoadingSkeleton';
 
 interface Referral {
   id: string;
@@ -67,6 +77,8 @@ const statusColors: Record<string, 'default' | 'warning' | 'info' | 'success'> =
 };
 
 export default function ReferralsPage() {
+  const { showSuccess, showError } = useToast();
+
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [topReferrers, setTopReferrers] = useState<TopReferrer[]>([]);
   const [summary, setSummary] = useState({
@@ -88,6 +100,20 @@ export default function ReferralsPage() {
     rewardValue: 100,
   });
 
+  // Detail Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedReferral, setSelectedReferral] = useState<Referral | null>(null);
+
+  // Confirm Dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  // Bulk select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   useEffect(() => {
     fetchReferrals();
     fetchClients();
@@ -107,9 +133,11 @@ export default function ReferralsPage() {
           rewarded: 0,
           totalRewardsGiven: 0,
         });
+      } else {
+        showError('Failed to fetch referrals');
       }
     } catch (error) {
-      console.error('Failed to fetch referrals:', error);
+      showError('Failed to fetch referrals');
     } finally {
       setLoading(false);
     }
@@ -121,9 +149,11 @@ export default function ReferralsPage() {
       if (response.ok) {
         const data = await response.json();
         setClients(data.clients || []);
+      } else {
+        showError('Failed to fetch clients');
       }
     } catch (error) {
-      console.error('Failed to fetch clients:', error);
+      showError('Failed to fetch clients');
     }
   };
 
@@ -138,15 +168,16 @@ export default function ReferralsPage() {
 
       if (!response.ok) {
         const data = await response.json();
-        alert(data.error || 'Failed to create referral');
+        showError(data.error || 'Failed to create referral');
         return;
       }
 
       setDialogOpen(false);
       setFormData({ referrerId: '', referredId: '', rewardType: 'points', rewardValue: 100 });
+      showSuccess('Referral created successfully');
       fetchReferrals();
     } catch (error) {
-      console.error('Failed to create referral:', error);
+      showError('Failed to create referral');
     } finally {
       setSaving(false);
     }
@@ -154,17 +185,115 @@ export default function ReferralsPage() {
 
   const handleAction = async (id: string, action: string) => {
     try {
-      await fetch('/api/referrals', {
+      const response = await fetch('/api/referrals', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action }),
       });
+      if (!response.ok) {
+        showError('Failed to update referral');
+        return;
+      }
+      showSuccess(
+        action === 'qualify'
+          ? 'Referral marked as qualified'
+          : 'Reward given successfully'
+      );
       fetchReferrals();
+      // Update the drawer if it is open and showing the same referral
+      if (selectedReferral?.id === id) {
+        const updated = await fetch('/api/referrals');
+        if (updated.ok) {
+          const data = await updated.json();
+          const found = (data.referrals || []).find((r: Referral) => r.id === id);
+          if (found) setSelectedReferral(found);
+        }
+      }
     } catch (error) {
-      console.error('Failed to update referral:', error);
+      showError('Failed to update referral');
     }
   };
 
+  // Delete single referral
+  const handleDeleteClick = (id: string) => {
+    setDeleteTargetId(id);
+    setConfirmOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetId) return;
+    setConfirmLoading(true);
+    try {
+      const response = await fetch(`/api/referrals?id=${deleteTargetId}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        showError('Failed to delete referral');
+        return;
+      }
+      showSuccess('Referral deleted successfully');
+      // Close drawer if the deleted referral was being viewed
+      if (selectedReferral?.id === deleteTargetId) {
+        setDrawerOpen(false);
+        setSelectedReferral(null);
+      }
+      // Remove from selection
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(deleteTargetId);
+        return next;
+      });
+      fetchReferrals();
+    } catch (error) {
+      showError('Failed to delete referral');
+    } finally {
+      setConfirmLoading(false);
+      setConfirmOpen(false);
+      setDeleteTargetId(null);
+    }
+  };
+
+  // Bulk delete
+  const handleBulkDeleteClick = () => {
+    if (selectedIds.size === 0) return;
+    setBulkConfirmOpen(true);
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    setBulkDeleting(true);
+    try {
+      const response = await fetch('/api/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), type: 'referrals' }),
+      });
+      if (!response.ok) {
+        showError('Failed to delete selected referrals');
+        return;
+      }
+      showSuccess(`${selectedIds.size} referral${selectedIds.size !== 1 ? 's' : ''} deleted successfully`);
+      // Close drawer if viewed referral was in the bulk delete set
+      if (selectedReferral && selectedIds.has(selectedReferral.id)) {
+        setDrawerOpen(false);
+        setSelectedReferral(null);
+      }
+      setSelectedIds(new Set());
+      fetchReferrals();
+    } catch (error) {
+      showError('Failed to delete selected referrals');
+    } finally {
+      setBulkDeleting(false);
+      setBulkConfirmOpen(false);
+    }
+  };
+
+  // Row click handler - open detail drawer
+  const handleRowClick = (referral: Referral) => {
+    setSelectedReferral(referral);
+    setDrawerOpen(true);
+  };
+
+  // Bulk select helpers
   const tabs = ['All', 'Pending', 'Qualified', 'Rewarded'];
   const statusMap: Record<number, string | null> = {
     0: null,
@@ -176,6 +305,49 @@ export default function ReferralsPage() {
   const filteredReferrals = referrals.filter(
     r => selectedTab === 0 || r.status === statusMap[selectedTab]
   );
+
+  const allFilteredSelected =
+    filteredReferrals.length > 0 &&
+    filteredReferrals.every((r) => selectedIds.has(r.id));
+
+  const someFilteredSelected =
+    filteredReferrals.some((r) => selectedIds.has(r.id)) && !allFilteredSelected;
+
+  const handleSelectAll = () => {
+    if (allFilteredSelected) {
+      // Deselect all filtered
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredReferrals.forEach((r) => next.delete(r.id));
+        return next;
+      });
+    } else {
+      // Select all filtered
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        filteredReferrals.forEach((r) => next.add(r.id));
+        return next;
+      });
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const formatReward = (referral: Referral) => {
+    if (referral.rewardType === 'points') return `${referral.rewardValue} pts`;
+    if (referral.rewardType === 'discount') return `$${referral.rewardValue} off`;
+    return referral.rewardType || '-';
+  };
 
   return (
     <Box>
@@ -251,15 +423,53 @@ export default function ReferralsPage() {
               </Tabs>
             </Box>
 
+            {/* Bulk Action Bar */}
+            {selectedIds.size > 0 && (
+              <Toolbar
+                sx={{
+                  pl: 2,
+                  pr: 1,
+                  mb: 1,
+                  borderRadius: 1,
+                  bgcolor: (theme) => alpha(theme.palette.primary.main, 0.08),
+                }}
+              >
+                <Typography sx={{ flex: '1 1 100%' }} color="primary" variant="subtitle1">
+                  {selectedIds.size} selected
+                </Typography>
+                <Button
+                  size="small"
+                  onClick={() => setSelectedIds(new Set())}
+                  sx={{ mr: 1 }}
+                >
+                  Clear Selection
+                </Button>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="error"
+                  startIcon={<Delete />}
+                  onClick={handleBulkDeleteClick}
+                >
+                  Delete Selected
+                </Button>
+              </Toolbar>
+            )}
+
             {loading ? (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-                <CircularProgress />
-              </Box>
+              <TableSkeleton rows={5} columns={7} />
             ) : (
               <TableContainer>
                 <Table>
                   <TableHead>
                     <TableRow>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          indeterminate={someFilteredSelected}
+                          checked={allFilteredSelected}
+                          onChange={handleSelectAll}
+                        />
+                      </TableCell>
                       <TableCell>Referrer</TableCell>
                       <TableCell>Referred</TableCell>
                       <TableCell>Status</TableCell>
@@ -270,7 +480,19 @@ export default function ReferralsPage() {
                   </TableHead>
                   <TableBody>
                     {filteredReferrals.map((referral) => (
-                      <TableRow key={referral.id} hover>
+                      <TableRow
+                        key={referral.id}
+                        hover
+                        sx={{ cursor: 'pointer' }}
+                        selected={selectedIds.has(referral.id)}
+                        onClick={() => handleRowClick(referral)}
+                      >
+                        <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selectedIds.has(referral.id)}
+                            onChange={() => handleSelectOne(referral.id)}
+                          />
+                        </TableCell>
                         <TableCell>
                           <Box>
                             <Typography variant="body2" fontWeight={500}>
@@ -299,16 +521,12 @@ export default function ReferralsPage() {
                           />
                         </TableCell>
                         <TableCell>
-                          {referral.rewardType === 'points'
-                            ? `${referral.rewardValue} pts`
-                            : referral.rewardType === 'discount'
-                            ? `$${referral.rewardValue} off`
-                            : referral.rewardType || '-'}
+                          {formatReward(referral)}
                         </TableCell>
                         <TableCell>
                           {format(new Date(referral.createdAt), 'MMM d, yyyy')}
                         </TableCell>
-                        <TableCell align="right">
+                        <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                           {referral.status === 'PENDING' && (
                             <Button
                               size="small"
@@ -333,7 +551,7 @@ export default function ReferralsPage() {
                     ))}
                     {filteredReferrals.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} align="center">
+                        <TableCell colSpan={7} align="center">
                           <Typography color="text.secondary" sx={{ py: 4 }}>
                             No referrals found
                           </Typography>
@@ -436,6 +654,195 @@ export default function ReferralsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Detail Drawer */}
+      <Drawer
+        anchor="right"
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        PaperProps={{ sx: { width: 420, maxWidth: '100vw' } }}
+      >
+        {selectedReferral && (
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* Drawer Header */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderBottom: 1, borderColor: 'divider' }}>
+              <Typography variant="h6" fontWeight={600}>
+                Referral Details
+              </Typography>
+              <IconButton onClick={() => setDrawerOpen(false)}>
+                <Close />
+              </IconButton>
+            </Box>
+
+            {/* Drawer Content */}
+            <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
+              {/* Status */}
+              <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="body2" color="text.secondary">Status:</Typography>
+                <Chip
+                  label={selectedReferral.status}
+                  size="small"
+                  color={statusColors[selectedReferral.status]}
+                />
+              </Box>
+
+              <Divider sx={{ mb: 2 }} />
+
+              {/* Referrer Section */}
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                REFERRER
+              </Typography>
+              <Box sx={{ mb: 3, pl: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Name</Typography>
+                  <Typography variant="body2" fontWeight={500}>{selectedReferral.referrer.name}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Phone</Typography>
+                  <Typography variant="body2">{selectedReferral.referrer.phone}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Email</Typography>
+                  <Typography variant="body2">{selectedReferral.referrer.email || '-'}</Typography>
+                </Box>
+              </Box>
+
+              <Divider sx={{ mb: 2 }} />
+
+              {/* Referred Section */}
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                REFERRED
+              </Typography>
+              <Box sx={{ mb: 3, pl: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Name</Typography>
+                  <Typography variant="body2" fontWeight={500}>{selectedReferral.referred.name}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Phone</Typography>
+                  <Typography variant="body2">{selectedReferral.referred.phone}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Email</Typography>
+                  <Typography variant="body2">{selectedReferral.referred.email || '-'}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Join Date</Typography>
+                  <Typography variant="body2">
+                    {format(new Date(selectedReferral.referred.createdAt), 'MMM d, yyyy')}
+                  </Typography>
+                </Box>
+              </Box>
+
+              <Divider sx={{ mb: 2 }} />
+
+              {/* Reward Section */}
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                REWARD
+              </Typography>
+              <Box sx={{ mb: 3, pl: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Reward Type</Typography>
+                  <Typography variant="body2">{selectedReferral.rewardType || '-'}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Reward Value</Typography>
+                  <Typography variant="body2">{formatReward(selectedReferral)}</Typography>
+                </Box>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Reward Given Date</Typography>
+                  <Typography variant="body2">
+                    {selectedReferral.rewardGivenAt
+                      ? format(new Date(selectedReferral.rewardGivenAt), 'MMM d, yyyy')
+                      : '-'}
+                  </Typography>
+                </Box>
+              </Box>
+
+              <Divider sx={{ mb: 2 }} />
+
+              {/* Dates */}
+              <Box sx={{ pl: 1 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography variant="body2" color="text.secondary">Created At</Typography>
+                  <Typography variant="body2">
+                    {format(new Date(selectedReferral.createdAt), 'MMM d, yyyy h:mm a')}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+
+            {/* Drawer Footer Actions */}
+            <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', display: 'flex', gap: 1 }}>
+              {selectedReferral.status === 'PENDING' && (
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<Edit />}
+                  onClick={() => {
+                    handleAction(selectedReferral.id, 'qualify');
+                  }}
+                >
+                  Mark Qualified
+                </Button>
+              )}
+              {selectedReferral.status === 'QUALIFIED' && (
+                <Button
+                  variant="contained"
+                  color="success"
+                  fullWidth
+                  startIcon={<CardGiftcard />}
+                  onClick={() => {
+                    handleAction(selectedReferral.id, 'reward');
+                  }}
+                >
+                  Give Reward
+                </Button>
+              )}
+              <Button
+                variant="outlined"
+                color="error"
+                fullWidth
+                startIcon={<Delete />}
+                onClick={() => {
+                  handleDeleteClick(selectedReferral.id);
+                }}
+              >
+                Delete
+              </Button>
+            </Box>
+          </Box>
+        )}
+      </Drawer>
+
+      {/* Single Delete Confirm Dialog */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete Referral"
+        message="Are you sure you want to delete this referral? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        loading={confirmLoading}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setDeleteTargetId(null);
+        }}
+      />
+
+      {/* Bulk Delete Confirm Dialog */}
+      <ConfirmDialog
+        open={bulkConfirmOpen}
+        title="Delete Selected Referrals"
+        message={`Are you sure you want to delete ${selectedIds.size} referral${selectedIds.size !== 1 ? 's' : ''}? This action cannot be undone.`}
+        confirmText={`Delete ${selectedIds.size}`}
+        cancelText="Cancel"
+        variant="danger"
+        loading={bulkDeleting}
+        onConfirm={handleBulkDeleteConfirm}
+        onCancel={() => setBulkConfirmOpen(false)}
+      />
     </Box>
   );
 }

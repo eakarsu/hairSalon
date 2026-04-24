@@ -6,12 +6,6 @@ import {
   Paper,
   Typography,
   Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Chip,
   IconButton,
   Dialog,
@@ -23,7 +17,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  CircularProgress,
   Grid,
   Card,
   CardContent,
@@ -31,6 +24,8 @@ import {
   ListItem,
   ListItemText,
   InputAdornment,
+  Drawer,
+  Divider,
 } from '@mui/material';
 import {
   Add,
@@ -39,7 +34,13 @@ import {
   CardGiftcard,
   LocalOffer,
   People,
+  Close,
+  AccessTime,
+  AttachMoney,
 } from '@mui/icons-material';
+import { useToast } from '@/components/ToastProvider';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { CardsSkeleton } from '@/components/LoadingSkeleton';
 
 interface PackageService {
   id: string;
@@ -67,6 +68,8 @@ interface Service {
   basePrice: number;
 }
 
+const DRAWER_WIDTH = 420;
+
 export default function PackagesPage() {
   const [packages, setPackages] = useState<ServicePackage[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -74,8 +77,13 @@ export default function PackagesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [sellDialogOpen, setSellDialogOpen] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<ServicePackage | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerPackage, setDrawerPackage] = useState<ServicePackage | null>(null);
   const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [packageToDelete, setPackageToDelete] = useState<ServicePackage | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -87,6 +95,8 @@ export default function PackagesPage() {
     packageId: '',
     clientId: '',
   });
+
+  const { showSuccess, showError } = useToast();
 
   useEffect(() => {
     fetchPackages();
@@ -100,9 +110,12 @@ export default function PackagesPage() {
       if (response.ok) {
         const data = await response.json();
         setPackages(data.packages || []);
+      } else {
+        showError('Failed to load packages');
       }
     } catch (error) {
       console.error('Failed to fetch packages:', error);
+      showError('Failed to load packages');
     } finally {
       setLoading(false);
     }
@@ -132,6 +145,32 @@ export default function PackagesPage() {
     }
   };
 
+  // --- Drawer handlers ---
+  const handleRowClick = (pkg: ServicePackage) => {
+    setDrawerPackage(pkg);
+    setDrawerOpen(true);
+  };
+
+  const handleDrawerClose = () => {
+    setDrawerOpen(false);
+    setDrawerPackage(null);
+  };
+
+  const handleDrawerEdit = () => {
+    if (drawerPackage) {
+      handleOpenDialog(drawerPackage);
+      handleDrawerClose();
+    }
+  };
+
+  const handleDrawerDelete = () => {
+    if (drawerPackage) {
+      setPackageToDelete(drawerPackage);
+      setConfirmDeleteOpen(true);
+    }
+  };
+
+  // --- Create / Edit dialog handlers ---
   const handleOpenDialog = (pkg?: ServicePackage) => {
     if (pkg) {
       setSelectedPackage(pkg);
@@ -140,7 +179,7 @@ export default function PackagesPage() {
         description: pkg.description || '',
         price: pkg.price,
         validDays: pkg.validDays,
-        services: pkg.services.map(s => ({ serviceId: s.serviceId, quantity: s.quantity })),
+        services: pkg.services.map((s) => ({ serviceId: s.serviceId, quantity: s.quantity })),
       });
     } else {
       setSelectedPackage(null);
@@ -158,8 +197,11 @@ export default function PackagesPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const response = await fetch('/api/packages', {
-        method: 'POST',
+      const url = selectedPackage ? `/api/packages/${selectedPackage.id}` : '/api/packages';
+      const method = selectedPackage ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
@@ -167,14 +209,41 @@ export default function PackagesPage() {
       if (!response.ok) throw new Error('Failed to save');
 
       setDialogOpen(false);
+      showSuccess(selectedPackage ? 'Package updated successfully' : 'Package created successfully');
       fetchPackages();
     } catch (error) {
       console.error('Failed to save package:', error);
+      showError('Failed to save package. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
+  // --- Delete handler ---
+  const handleDelete = async () => {
+    if (!packageToDelete) return;
+    setDeleting(true);
+    try {
+      const response = await fetch(`/api/packages/${packageToDelete.id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('Failed to delete');
+
+      showSuccess(`"${packageToDelete.name}" deleted successfully`);
+      setConfirmDeleteOpen(false);
+      setPackageToDelete(null);
+      handleDrawerClose();
+      fetchPackages();
+    } catch (error) {
+      console.error('Failed to delete package:', error);
+      showError('Failed to delete package. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // --- Sell handler ---
   const handleSell = async () => {
     setSaving(true);
     try {
@@ -188,14 +257,17 @@ export default function PackagesPage() {
 
       setSellDialogOpen(false);
       setSellData({ packageId: '', clientId: '' });
+      showSuccess('Package sold successfully!');
       fetchPackages();
     } catch (error) {
       console.error('Failed to sell package:', error);
+      showError('Failed to sell package. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
+  // --- Package service form helpers ---
   const addServiceToPackage = () => {
     setFormData({
       ...formData,
@@ -217,10 +289,11 @@ export default function PackagesPage() {
   };
 
   // Calculate suggested price based on services
-  const suggestedPrice = formData.services.reduce((sum, s) => {
-    const service = services.find(svc => svc.id === s.serviceId);
-    return sum + (service?.basePrice || 0) * s.quantity;
-  }, 0) * 0.85; // 15% discount
+  const suggestedPrice =
+    formData.services.reduce((sum, s) => {
+      const service = services.find((svc) => svc.id === s.serviceId);
+      return sum + (service?.basePrice || 0) * s.quantity;
+    }, 0) * 0.85; // 15% discount
 
   return (
     <Box>
@@ -228,73 +301,101 @@ export default function PackagesPage() {
         <Typography variant="h4" fontWeight={600}>
           Service Packages
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpenDialog()}
-        >
+        <Button variant="contained" startIcon={<Add />} onClick={() => handleOpenDialog()}>
           Create Package
         </Button>
       </Box>
 
       {/* Stats Cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 6, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <CardGiftcard color="primary" />
-                <Typography variant="body2" color="text.secondary">Active Packages</Typography>
-              </Box>
-              <Typography variant="h4">{packages.length}</Typography>
-            </CardContent>
-          </Card>
+      {loading ? (
+        <Box sx={{ mb: 3 }}>
+          <CardsSkeleton count={3} />
+        </Box>
+      ) : (
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid size={{ xs: 6, md: 4 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <CardGiftcard color="primary" />
+                  <Typography variant="body2" color="text.secondary">
+                    Active Packages
+                  </Typography>
+                </Box>
+                <Typography variant="h4">{packages.length}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 4 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <People color="success" />
+                  <Typography variant="body2" color="text.secondary">
+                    Packages Sold
+                  </Typography>
+                </Box>
+                <Typography variant="h4">
+                  {packages.reduce((sum, p) => sum + p.sales.length, 0)}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 4 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <LocalOffer color="info" />
+                  <Typography variant="body2" color="text.secondary">
+                    Avg. Savings
+                  </Typography>
+                </Box>
+                <Typography variant="h4">
+                  {packages.length > 0
+                    ? Math.round(
+                        packages.reduce((sum, p) => sum + parseFloat(p.savingsPercent), 0) /
+                          packages.length
+                      )
+                    : 0}
+                  %
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
-        <Grid size={{ xs: 6, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <People color="success" />
-                <Typography variant="body2" color="text.secondary">Packages Sold</Typography>
-              </Box>
-              <Typography variant="h4">
-                {packages.reduce((sum, p) => sum + p.sales.length, 0)}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 6, md: 4 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <LocalOffer color="info" />
-                <Typography variant="body2" color="text.secondary">Avg. Savings</Typography>
-              </Box>
-              <Typography variant="h4">
-                {packages.length > 0
-                  ? Math.round(packages.reduce((sum, p) => sum + parseFloat(p.savingsPercent), 0) / packages.length)
-                  : 0}%
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      )}
 
+      {/* Package Cards */}
       <Paper sx={{ p: 2 }}>
         {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
-          </Box>
+          <CardsSkeleton count={6} />
         ) : (
           <Grid container spacing={3}>
             {packages.map((pkg) => (
               <Grid key={pkg.id} size={{ xs: 12, md: 6, lg: 4 }}>
-                <Card variant="outlined">
+                <Card
+                  variant="outlined"
+                  sx={{
+                    cursor: 'pointer',
+                    transition: 'box-shadow 0.2s, border-color 0.2s',
+                    '&:hover': {
+                      boxShadow: 4,
+                      borderColor: 'primary.main',
+                    },
+                  }}
+                  onClick={() => handleRowClick(pkg)}
+                >
                   <CardContent>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
                       <Typography variant="h6">{pkg.name}</Typography>
                       <Box>
-                        <IconButton size="small" onClick={() => handleOpenDialog(pkg)}>
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenDialog(pkg);
+                          }}
+                        >
                           <Edit />
                         </IconButton>
                       </Box>
@@ -308,12 +409,18 @@ export default function PackagesPage() {
                       <Typography variant="h4" color="primary">
                         ${pkg.price.toFixed(2)}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ textDecoration: 'line-through' }}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ textDecoration: 'line-through' }}
+                      >
                         ${pkg.regularPrice.toFixed(2)}
                       </Typography>
                       <Chip label={`Save ${pkg.savingsPercent}%`} color="success" size="small" />
                     </Box>
-                    <Typography variant="subtitle2" sx={{ mb: 1 }}>Includes:</Typography>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Includes:
+                    </Typography>
                     <List dense>
                       {pkg.services.map((s) => (
                         <ListItem key={s.id} sx={{ py: 0 }}>
@@ -325,13 +432,14 @@ export default function PackagesPage() {
                       ))}
                     </List>
                     <Typography variant="caption" color="text.secondary">
-                      Valid for {pkg.validDays} days • {pkg.sales.length} sold
+                      Valid for {pkg.validDays} days &bull; {pkg.sales.length} sold
                     </Typography>
                     <Button
                       variant="outlined"
                       fullWidth
                       sx={{ mt: 2 }}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setSellData({ ...sellData, packageId: pkg.id });
                         setSellDialogOpen(true);
                       }}
@@ -352,6 +460,205 @@ export default function PackagesPage() {
           </Grid>
         )}
       </Paper>
+
+      {/* Detail Drawer */}
+      <Drawer
+        anchor="right"
+        open={drawerOpen}
+        onClose={handleDrawerClose}
+        PaperProps={{ sx: { width: { xs: '100%', sm: DRAWER_WIDTH }, p: 0 } }}
+      >
+        {drawerPackage && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            {/* Drawer Header */}
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                p: 2,
+                borderBottom: 1,
+                borderColor: 'divider',
+              }}
+            >
+              <Typography variant="h6" fontWeight={600}>
+                Package Details
+              </Typography>
+              <IconButton onClick={handleDrawerClose} size="small">
+                <Close />
+              </IconButton>
+            </Box>
+
+            {/* Drawer Body */}
+            <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
+              {/* Name */}
+              <Typography variant="h5" fontWeight={700} gutterBottom>
+                {drawerPackage.name}
+              </Typography>
+
+              {/* Description */}
+              {drawerPackage.description && (
+                <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                  {drawerPackage.description}
+                </Typography>
+              )}
+
+              <Divider sx={{ my: 2 }} />
+
+              {/* Price */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <AttachMoney color="primary" />
+                <Typography variant="subtitle2" color="text.secondary" sx={{ minWidth: 80 }}>
+                  Price
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+                  <Typography variant="h5" color="primary" fontWeight={600}>
+                    ${drawerPackage.price.toFixed(2)}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    sx={{ textDecoration: 'line-through' }}
+                  >
+                    ${drawerPackage.regularPrice.toFixed(2)}
+                  </Typography>
+                  <Chip
+                    label={`Save ${drawerPackage.savingsPercent}%`}
+                    color="success"
+                    size="small"
+                  />
+                </Box>
+              </Box>
+
+              {/* Valid Days */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <AccessTime color="action" />
+                <Typography variant="subtitle2" color="text.secondary" sx={{ minWidth: 80 }}>
+                  Valid Days
+                </Typography>
+                <Typography variant="body1">{drawerPackage.validDays} days</Typography>
+              </Box>
+
+              {/* Sales Count */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                <People color="action" />
+                <Typography variant="subtitle2" color="text.secondary" sx={{ minWidth: 80 }}>
+                  Sold
+                </Typography>
+                <Typography variant="body1">{drawerPackage.sales.length} times</Typography>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              {/* Included Services */}
+              <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
+                Included Services
+              </Typography>
+              <List dense disablePadding>
+                {drawerPackage.services.map((s) => (
+                  <ListItem
+                    key={s.id}
+                    sx={{
+                      py: 1,
+                      px: 1.5,
+                      mb: 0.5,
+                      bgcolor: 'action.hover',
+                      borderRadius: 1,
+                    }}
+                  >
+                    <ListItemText
+                      primary={
+                        <Typography variant="body2" fontWeight={500}>
+                          {s.quantity}x {s.service.name}
+                        </Typography>
+                      }
+                      secondary={`$${s.service.basePrice.toFixed(2)} each | $${(s.service.basePrice * s.quantity).toFixed(2)} total value`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+
+              {/* Sales History (if any) */}
+              {drawerPackage.sales.length > 0 && (
+                <>
+                  <Divider sx={{ my: 2 }} />
+                  <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>
+                    Recent Sales
+                  </Typography>
+                  <List dense disablePadding>
+                    {drawerPackage.sales.slice(0, 5).map((sale) => (
+                      <ListItem key={sale.id} sx={{ py: 0.5, px: 1.5 }}>
+                        <ListItemText
+                          primary={sale.client.name}
+                          secondary={`Expires: ${new Date(sale.expiresAt).toLocaleDateString()}`}
+                        />
+                      </ListItem>
+                    ))}
+                    {drawerPackage.sales.length > 5 && (
+                      <Typography variant="caption" color="text.secondary" sx={{ pl: 1.5 }}>
+                        +{drawerPackage.sales.length - 5} more
+                      </Typography>
+                    )}
+                  </List>
+                </>
+              )}
+            </Box>
+
+            {/* Drawer Footer / Actions */}
+            <Box
+              sx={{
+                p: 2,
+                borderTop: 1,
+                borderColor: 'divider',
+                display: 'flex',
+                gap: 1.5,
+              }}
+            >
+              <Button
+                variant="contained"
+                startIcon={<Edit />}
+                onClick={handleDrawerEdit}
+                fullWidth
+              >
+                Edit
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<Delete />}
+                onClick={handleDrawerDelete}
+                fullWidth
+              >
+                Delete
+              </Button>
+            </Box>
+          </Box>
+        )}
+      </Drawer>
+
+      {/* Confirm Delete Dialog */}
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title="Delete Package"
+        message={
+          packageToDelete
+            ? `Are you sure you want to delete "${packageToDelete.name}"? This action cannot be undone.${
+                packageToDelete.sales.length > 0
+                  ? ` This package has ${packageToDelete.sales.length} active sale(s).`
+                  : ''
+              }`
+            : ''
+        }
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => {
+          setConfirmDeleteOpen(false);
+          setPackageToDelete(null);
+        }}
+      />
 
       {/* Create/Edit Package Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
@@ -382,8 +689,12 @@ export default function PackagesPage() {
                   required
                   value={formData.price}
                   onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) })}
-                  InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
-                  helperText={suggestedPrice > 0 ? `Suggested: $${suggestedPrice.toFixed(2)} (15% off)` : ''}
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                  }}
+                  helperText={
+                    suggestedPrice > 0 ? `Suggested: $${suggestedPrice.toFixed(2)} (15% off)` : ''
+                  }
                 />
               </Grid>
               <Grid size={{ xs: 6 }}>
@@ -392,12 +703,16 @@ export default function PackagesPage() {
                   type="number"
                   fullWidth
                   value={formData.validDays}
-                  onChange={(e) => setFormData({ ...formData, validDays: parseInt(e.target.value) })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, validDays: parseInt(e.target.value) })
+                  }
                 />
               </Grid>
             </Grid>
 
-            <Typography variant="subtitle1" sx={{ mt: 2 }}>Services Included</Typography>
+            <Typography variant="subtitle1" sx={{ mt: 2 }}>
+              Services Included
+            </Typography>
             {formData.services.map((s, index) => (
               <Box key={index} sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                 <FormControl sx={{ flex: 2 }}>
@@ -445,7 +760,12 @@ export default function PackagesPage() {
       </Dialog>
 
       {/* Sell Package Dialog */}
-      <Dialog open={sellDialogOpen} onClose={() => setSellDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={sellDialogOpen}
+        onClose={() => setSellDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>Sell Package</DialogTitle>
         <DialogContent>
           <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -465,7 +785,7 @@ export default function PackagesPage() {
             </FormControl>
             {sellData.packageId && (
               <Typography>
-                Price: ${packages.find(p => p.id === sellData.packageId)?.price.toFixed(2)}
+                Price: ${packages.find((p) => p.id === sellData.packageId)?.price.toFixed(2)}
               </Typography>
             )}
           </Box>

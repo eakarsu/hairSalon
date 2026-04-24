@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -25,12 +25,15 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  CircularProgress,
   Grid,
   Card,
   CardContent,
   Tabs,
   Tab,
+  Checkbox,
+  Drawer,
+  Divider,
+  Tooltip,
 } from '@mui/material';
 import {
   Search,
@@ -41,8 +44,14 @@ import {
   Schedule,
   Warning,
   TaskAlt,
+  Close,
+  DeleteSweep,
+  SwapHoriz,
 } from '@mui/icons-material';
 import { format, isPast, isToday } from 'date-fns';
+import { useToast } from '@/components/ToastProvider';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { TableSkeleton, CardsSkeleton } from '@/components/LoadingSkeleton';
 
 interface Task {
   id: string;
@@ -69,12 +78,28 @@ const statusColors: Record<string, 'default' | 'primary' | 'success' | 'error'> 
   CANCELLED: 'error',
 };
 
+const statusLabels: Record<string, string> = {
+  OPEN: 'Open',
+  IN_PROGRESS: 'In Progress',
+  DONE: 'Done',
+  CANCELLED: 'Cancelled',
+};
+
+const typeLabels: Record<string, string> = {
+  FOLLOW_UP: 'Follow Up',
+  STAFFING: 'Staffing',
+  INVENTORY: 'Inventory',
+  OTHER: 'Other',
+};
+
 interface StaffMember {
   id: string;
   name: string;
 }
 
 export default function TasksPage() {
+  const { showSuccess, showError } = useToast();
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,6 +116,28 @@ export default function TasksPage() {
     dueDate: '',
     assignedToId: '',
   });
+
+  // Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerTask, setDrawerTask] = useState<Task | null>(null);
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Confirm dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmMessage, setConfirmMessage] = useState<string | React.ReactNode>('');
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
+
+  // Bulk status update state
+  const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
+  const [bulkStatusValue, setBulkStatusValue] = useState('');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+
+  // Single delete state
+  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTasks();
@@ -123,24 +170,39 @@ export default function TasksPage() {
     }
   };
 
-  const handleOpenDialog = () => {
-    setSelectedTask(null);
-    setFormData({
-      title: '',
-      description: '',
-      type: 'OTHER',
-      status: 'OPEN',
-      dueDate: '',
-      assignedToId: '',
-    });
+  const handleOpenDialog = (task?: Task) => {
+    if (task) {
+      setSelectedTask(task);
+      setFormData({
+        title: task.title,
+        description: task.description || '',
+        type: task.type,
+        status: task.status,
+        dueDate: task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : '',
+        assignedToId: '',
+      });
+    } else {
+      setSelectedTask(null);
+      setFormData({
+        title: '',
+        description: '',
+        type: 'OTHER',
+        status: 'OPEN',
+        dueDate: '',
+        assignedToId: '',
+      });
+    }
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const response = await fetch('/api/tasks', {
-        method: 'POST',
+      const url = selectedTask ? `/api/tasks/${selectedTask.id}` : '/api/tasks';
+      const method = selectedTask ? 'PATCH' : 'POST';
+
+      const response = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
@@ -148,12 +210,128 @@ export default function TasksPage() {
       if (!response.ok) throw new Error('Failed to save');
 
       setDialogOpen(false);
+      showSuccess(selectedTask ? 'Task updated successfully' : 'Task created successfully');
       fetchTasks();
     } catch (error) {
       console.error('Failed to save task:', error);
+      showError('Failed to save task');
     } finally {
       setSaving(false);
     }
+  };
+
+  // Row click => open detail drawer
+  const handleRowClick = (task: Task) => {
+    setDrawerTask(task);
+    setDrawerOpen(true);
+  };
+
+  // Single delete
+  const handleDeleteSingle = (taskId: string) => {
+    setDeleteTaskId(taskId);
+    setConfirmTitle('Delete Task');
+    setConfirmMessage('Are you sure you want to delete this task? This action cannot be undone.');
+    setConfirmAction(() => async () => {
+      setConfirmLoading(true);
+      try {
+        const response = await fetch('/api/bulk', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [taskId], type: 'tasks' }),
+        });
+        if (!response.ok) throw new Error('Failed to delete');
+        showSuccess('Task deleted successfully');
+        setConfirmOpen(false);
+        setDrawerOpen(false);
+        setDrawerTask(null);
+        setDeleteTaskId(null);
+        fetchTasks();
+      } catch (error) {
+        console.error('Failed to delete task:', error);
+        showError('Failed to delete task');
+      } finally {
+        setConfirmLoading(false);
+      }
+    });
+    setConfirmOpen(true);
+  };
+
+  // Bulk delete
+  const handleBulkDelete = () => {
+    setConfirmTitle('Delete Selected Tasks');
+    setConfirmMessage(
+      `Are you sure you want to delete ${selectedIds.length} selected task${selectedIds.length > 1 ? 's' : ''}? This action cannot be undone.`
+    );
+    setConfirmAction(() => async () => {
+      setConfirmLoading(true);
+      try {
+        const response = await fetch('/api/bulk', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: selectedIds, type: 'tasks' }),
+        });
+        if (!response.ok) throw new Error('Failed to delete');
+        const data = await response.json();
+        showSuccess(`Deleted ${data.deletedCount} task${data.deletedCount > 1 ? 's' : ''} successfully`);
+        setSelectedIds([]);
+        setConfirmOpen(false);
+        fetchTasks();
+      } catch (error) {
+        console.error('Bulk delete failed:', error);
+        showError('Failed to delete selected tasks');
+      } finally {
+        setConfirmLoading(false);
+      }
+    });
+    setConfirmOpen(true);
+  };
+
+  // Bulk status update
+  const handleBulkStatusUpdate = async () => {
+    if (!bulkStatusValue) return;
+    setBulkUpdating(true);
+    try {
+      const response = await fetch('/api/bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ids: selectedIds,
+          type: 'tasks',
+          updates: { status: bulkStatusValue },
+        }),
+      });
+      if (!response.ok) throw new Error('Failed to update');
+      const data = await response.json();
+      showSuccess(`Updated ${data.updatedCount} task${data.updatedCount > 1 ? 's' : ''} successfully`);
+      setSelectedIds([]);
+      setBulkStatusDialogOpen(false);
+      setBulkStatusValue('');
+      fetchTasks();
+    } catch (error) {
+      console.error('Bulk update failed:', error);
+      showError('Failed to update selected tasks');
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  // Checkbox handlers
+  const handleSelectAll = useCallback(
+    (checked: boolean) => {
+      if (checked) {
+        setSelectedIds(filteredTasks.map((t) => t.id));
+      } else {
+        setSelectedIds([]);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tasks, searchQuery, selectedTab]
+  );
+
+  const handleSelectOne = (taskId: string, checked: boolean) => {
+    setSelectedIds((prev) =>
+      checked ? [...prev, taskId] : prev.filter((id) => id !== taskId)
+    );
   };
 
   // Mock data
@@ -182,11 +360,14 @@ export default function TasksPage() {
         (task.description && task.description.toLowerCase().includes(searchQuery.toLowerCase())))
   );
 
-  const openTasks = mockTasks.filter(t => t.status === 'OPEN').length;
-  const inProgressTasks = mockTasks.filter(t => t.status === 'IN_PROGRESS').length;
+  const openTasks = mockTasks.filter((t) => t.status === 'OPEN').length;
+  const inProgressTasks = mockTasks.filter((t) => t.status === 'IN_PROGRESS').length;
   const overdueTasks = mockTasks.filter(
-    t => t.dueDate && isPast(new Date(t.dueDate)) && t.status !== 'DONE' && t.status !== 'CANCELLED'
+    (t) => t.dueDate && isPast(new Date(t.dueDate)) && t.status !== 'DONE' && t.status !== 'CANCELLED'
   ).length;
+
+  const allSelected = filteredTasks.length > 0 && selectedIds.length === filteredTasks.length;
+  const someSelected = selectedIds.length > 0 && selectedIds.length < filteredTasks.length;
 
   const getDueDateDisplay = (dueDate: string | null) => {
     if (!dueDate) return null;
@@ -212,62 +393,64 @@ export default function TasksPage() {
         <Typography variant="h4" fontWeight={600}>
           Tasks
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={handleOpenDialog}
-        >
+        <Button variant="contained" startIcon={<Add />} onClick={() => handleOpenDialog()}>
           Add Task
         </Button>
       </Box>
 
       {/* Stats Cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <TaskAlt color="primary" />
-                <Typography variant="body2" color="text.secondary">Open Tasks</Typography>
-              </Box>
-              <Typography variant="h4">{openTasks}</Typography>
-            </CardContent>
-          </Card>
+      {loading ? (
+        <Box sx={{ mb: 3 }}>
+          <CardsSkeleton count={4} />
+        </Box>
+      ) : (
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <TaskAlt color="primary" />
+                  <Typography variant="body2" color="text.secondary">Open Tasks</Typography>
+                </Box>
+                <Typography variant="h4">{openTasks}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Schedule color="info" />
+                  <Typography variant="body2" color="text.secondary">In Progress</Typography>
+                </Box>
+                <Typography variant="h4">{inProgressTasks}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Warning color="error" />
+                  <Typography variant="body2" color="text.secondary">Overdue</Typography>
+                </Box>
+                <Typography variant="h4" color="error.main">{overdueTasks}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <CheckCircle color="success" />
+                  <Typography variant="body2" color="text.secondary">Completed</Typography>
+                </Box>
+                <Typography variant="h4">{mockTasks.filter((t) => t.status === 'DONE').length}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <Schedule color="info" />
-                <Typography variant="body2" color="text.secondary">In Progress</Typography>
-              </Box>
-              <Typography variant="h4">{inProgressTasks}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <Warning color="error" />
-                <Typography variant="body2" color="text.secondary">Overdue</Typography>
-              </Box>
-              <Typography variant="h4" color="error.main">{overdueTasks}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <CheckCircle color="success" />
-                <Typography variant="body2" color="text.secondary">Completed</Typography>
-              </Box>
-              <Typography variant="h4">{mockTasks.filter(t => t.status === 'DONE').length}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      )}
 
       <Paper sx={{ p: 2 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
@@ -278,7 +461,7 @@ export default function TasksPage() {
           </Tabs>
         </Box>
 
-        <Box sx={{ mb: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, gap: 2, flexWrap: 'wrap' }}>
           <TextField
             placeholder="Search tasks..."
             size="small"
@@ -293,17 +476,52 @@ export default function TasksPage() {
               ),
             }}
           />
+
+          {/* Bulk action buttons */}
+          {selectedIds.length > 0 && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                {selectedIds.length} selected
+              </Typography>
+              <Tooltip title="Change Status">
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<SwapHoriz />}
+                  onClick={() => setBulkStatusDialogOpen(true)}
+                >
+                  Change Status
+                </Button>
+              </Tooltip>
+              <Tooltip title="Delete Selected">
+                <Button
+                  variant="outlined"
+                  color="error"
+                  size="small"
+                  startIcon={<DeleteSweep />}
+                  onClick={handleBulkDelete}
+                >
+                  Delete
+                </Button>
+              </Tooltip>
+            </Box>
+          )}
         </Box>
 
         {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
-          </Box>
+          <TableSkeleton rows={5} columns={7} />
         ) : (
           <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      indeterminate={someSelected}
+                      checked={allSelected}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                    />
+                  </TableCell>
                   <TableCell>Task</TableCell>
                   <TableCell>Type</TableCell>
                   <TableCell>Status</TableCell>
@@ -314,7 +532,18 @@ export default function TasksPage() {
               </TableHead>
               <TableBody>
                 {filteredTasks.map((task) => (
-                  <TableRow key={task.id} hover>
+                  <TableRow
+                    key={task.id}
+                    hover
+                    sx={{ cursor: 'pointer' }}
+                    onClick={() => handleRowClick(task)}
+                  >
+                    <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.includes(task.id)}
+                        onChange={(e) => handleSelectOne(task.id, e.target.checked)}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Box>
                         <Typography variant="body2" fontWeight={500}>
@@ -357,13 +586,10 @@ export default function TasksPage() {
                         </Typography>
                       )}
                     </TableCell>
-                    <TableCell align="right">
+                    <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                       <IconButton
                         size="small"
-                        onClick={() => {
-                          setSelectedTask(task);
-                          setDialogOpen(true);
-                        }}
+                        onClick={() => handleOpenDialog(task)}
                       >
                         <Edit />
                       </IconButton>
@@ -372,17 +598,142 @@ export default function TasksPage() {
                           <CheckCircle />
                         </IconButton>
                       )}
-                      <IconButton size="small" color="error">
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => handleDeleteSingle(task.id)}
+                      >
                         <Delete />
                       </IconButton>
                     </TableCell>
                   </TableRow>
                 ))}
+                {filteredTasks.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        No tasks found
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </TableContainer>
         )}
       </Paper>
+
+      {/* Detail Drawer */}
+      <Drawer
+        anchor="right"
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        PaperProps={{ sx: { width: { xs: '100%', sm: 420 }, p: 0 } }}
+      >
+        {drawerTask && (
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* Drawer Header */}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2, borderBottom: 1, borderColor: 'divider' }}>
+              <Typography variant="h6" fontWeight={600}>
+                Task Details
+              </Typography>
+              <IconButton onClick={() => setDrawerOpen(false)}>
+                <Close />
+              </IconButton>
+            </Box>
+
+            {/* Drawer Content */}
+            <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
+              <Typography variant="h6" fontWeight={600} gutterBottom>
+                {drawerTask.title}
+              </Typography>
+
+              {drawerTask.description && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  {drawerTask.description}
+                </Typography>
+              )}
+
+              <Divider sx={{ mb: 2 }} />
+
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Type</Typography>
+                  <Chip
+                    label={typeLabels[drawerTask.type] || drawerTask.type}
+                    size="small"
+                    color={typeColors[drawerTask.type]}
+                    variant="outlined"
+                  />
+                </Box>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Status</Typography>
+                  <Chip
+                    label={statusLabels[drawerTask.status] || drawerTask.status}
+                    size="small"
+                    color={statusColors[drawerTask.status]}
+                  />
+                </Box>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Due Date</Typography>
+                  {drawerTask.dueDate ? (
+                    getDueDateDisplay(drawerTask.dueDate)
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">Not set</Typography>
+                  )}
+                </Box>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Assigned To</Typography>
+                  {drawerTask.assignedToName ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Avatar sx={{ width: 24, height: 24, fontSize: '0.75rem' }}>
+                        {drawerTask.assignedToName.charAt(0)}
+                      </Avatar>
+                      <Typography variant="body2">{drawerTask.assignedToName}</Typography>
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">Unassigned</Typography>
+                  )}
+                </Box>
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Created</Typography>
+                  <Typography variant="body2">
+                    {format(new Date(drawerTask.createdAt), 'MMM d, yyyy')}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+
+            {/* Drawer Footer with Actions */}
+            <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', display: 'flex', gap: 1 }}>
+              <Button
+                variant="contained"
+                startIcon={<Edit />}
+                fullWidth
+                onClick={() => {
+                  setDrawerOpen(false);
+                  handleOpenDialog(drawerTask);
+                }}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<Delete />}
+                fullWidth
+                onClick={() => handleDeleteSingle(drawerTask.id)}
+              >
+                Delete
+              </Button>
+            </Box>
+          </Box>
+        )}
+      </Drawer>
 
       {/* Add/Edit Task Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
@@ -466,6 +817,51 @@ export default function TasksPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Bulk Status Update Dialog */}
+      <Dialog open={bulkStatusDialogOpen} onClose={() => setBulkStatusDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Change Status for {selectedIds.length} Task{selectedIds.length > 1 ? 's' : ''}</DialogTitle>
+        <DialogContent>
+          <FormControl fullWidth sx={{ mt: 2 }}>
+            <InputLabel>New Status</InputLabel>
+            <Select
+              label="New Status"
+              value={bulkStatusValue}
+              onChange={(e) => setBulkStatusValue(e.target.value)}
+            >
+              <MenuItem value="OPEN">Open</MenuItem>
+              <MenuItem value="IN_PROGRESS">In Progress</MenuItem>
+              <MenuItem value="DONE">Done</MenuItem>
+              <MenuItem value="CANCELLED">Cancelled</MenuItem>
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setBulkStatusDialogOpen(false); setBulkStatusValue(''); }}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleBulkStatusUpdate}
+            disabled={bulkUpdating || !bulkStatusValue}
+          >
+            {bulkUpdating ? 'Updating...' : 'Update Status'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title={confirmTitle}
+        message={confirmMessage}
+        confirmText="Delete"
+        variant="danger"
+        loading={confirmLoading}
+        onConfirm={confirmAction}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setDeleteTaskId(null);
+        }}
+      />
     </Box>
   );
 }

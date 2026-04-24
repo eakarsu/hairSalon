@@ -575,7 +575,7 @@ async function main() {
   );
   console.log('Created', galleryPhotos.length, 'gallery photos');
 
-  // Create Gift Cards (10+)
+  // Create Gift Cards (18 entries)
   const giftCardsData = [
     { code: 'GIFT-001-2024', initialValue: 50, balance: 50, purchasedBy: 'John Smith', status: GiftCardStatus.ACTIVE },
     { code: 'GIFT-002-2024', initialValue: 100, balance: 75, purchasedBy: 'Jane Doe', status: GiftCardStatus.ACTIVE },
@@ -587,6 +587,14 @@ async function main() {
     { code: 'GIFT-008-2024', initialValue: 100, balance: 0, purchasedBy: 'Tom Miller', status: GiftCardStatus.USED },
     { code: 'GIFT-009-2024', initialValue: 75, balance: 25, purchasedBy: 'Amy Taylor', status: GiftCardStatus.ACTIVE },
     { code: 'GIFT-010-2024', initialValue: 50, balance: 50, purchasedBy: 'Chris Davis', status: GiftCardStatus.CANCELLED },
+    { code: 'GIFT-011-2024', initialValue: 100, balance: 100, purchasedBy: 'Robert Garcia', status: GiftCardStatus.ACTIVE },
+    { code: 'GIFT-012-2024', initialValue: 250, balance: 150, purchasedBy: 'Nancy Tran', status: GiftCardStatus.ACTIVE },
+    { code: 'GIFT-013-2024', initialValue: 50, balance: 0, purchasedBy: 'Kevin Park', status: GiftCardStatus.USED },
+    { code: 'GIFT-014-2024', initialValue: 75, balance: 75, purchasedBy: 'Diana Torres', status: GiftCardStatus.ACTIVE },
+    { code: 'GIFT-015-2024', initialValue: 100, balance: 60, purchasedBy: 'Steven Wang', status: GiftCardStatus.ACTIVE },
+    { code: 'GIFT-016-2024', initialValue: 150, balance: 150, purchasedBy: 'Jennifer Lopez', status: GiftCardStatus.ACTIVE },
+    { code: 'GIFT-017-2024', initialValue: 50, balance: 50, purchasedBy: 'Brian Adams', status: GiftCardStatus.EXPIRED, expiresAt: subDays(now, 15) },
+    { code: 'GIFT-018-2024', initialValue: 300, balance: 300, purchasedBy: 'Corporate Order', status: GiftCardStatus.ACTIVE },
   ];
 
   const giftCards = await Promise.all(
@@ -603,7 +611,7 @@ async function main() {
   );
   console.log('Created', giftCards.length, 'gift cards');
 
-  // Create Waitlist entries (8+)
+  // Create Waitlist entries (16 entries)
   const waitlistData = [
     { clientName: 'Walk-in Customer 1', clientPhone: '(408) 555-9001', partySize: 1, status: WaitlistStatus.WAITING, estimatedWait: 15 },
     { clientName: 'Walk-in Customer 2', clientPhone: '(408) 555-9002', partySize: 2, status: WaitlistStatus.WAITING, estimatedWait: 30 },
@@ -613,6 +621,14 @@ async function main() {
     { clientName: 'Walk-in Customer 6', clientPhone: '(408) 555-9006', partySize: 1, status: WaitlistStatus.CANCELLED, estimatedWait: 20 },
     { clientName: 'Walk-in Customer 7', clientPhone: '(408) 555-9007', partySize: 2, status: WaitlistStatus.WAITING, estimatedWait: 25 },
     { clientName: 'Walk-in Customer 8', clientPhone: '(408) 555-9008', partySize: 1, status: WaitlistStatus.WAITING, estimatedWait: 35 },
+    { clientName: 'Walk-in Customer 9', clientPhone: '(408) 555-9009', partySize: 1, status: WaitlistStatus.WAITING, estimatedWait: 10 },
+    { clientName: 'Walk-in Customer 10', clientPhone: '(408) 555-9010', partySize: 2, status: WaitlistStatus.NOTIFIED, estimatedWait: 5 },
+    { clientName: 'Walk-in Customer 11', clientPhone: '(408) 555-9011', partySize: 1, status: WaitlistStatus.SEATED, estimatedWait: 0 },
+    { clientName: 'Walk-in Customer 12', clientPhone: '(408) 555-9012', partySize: 1, status: WaitlistStatus.WAITING, estimatedWait: 40 },
+    { clientName: 'Walk-in Customer 13', clientPhone: '(408) 555-9013', partySize: 2, status: WaitlistStatus.LEFT, estimatedWait: 50 },
+    { clientName: 'Walk-in Customer 14', clientPhone: '(408) 555-9014', partySize: 1, status: WaitlistStatus.CANCELLED, estimatedWait: 30 },
+    { clientName: 'Walk-in Customer 15', clientPhone: '(408) 555-9015', partySize: 1, status: WaitlistStatus.WAITING, estimatedWait: 20 },
+    { clientName: 'Walk-in Customer 16', clientPhone: '(408) 555-9016', partySize: 3, status: WaitlistStatus.WAITING, estimatedWait: 55 },
   ];
 
   const waitlistEntries = await Promise.all(
@@ -710,35 +726,39 @@ async function main() {
   }
   console.log('Created', reviews.length, 'reviews');
 
-  // Create AI Audit Logs
-  const auditLogs = await Promise.all([
-    prisma.aIAuditLog.create({
+  // Create AI Audit Logs (18 entries)
+  const auditLogsData = [
+    { clientId: clients[0].id, contextType: AIContextType.REMINDER, inputSummary: 'Generated appointment reminder for Jessica Martinez - Gel Manicure', outputSummary: 'Reminder sent in Spanish: Hola Jessica! Recordatorio de tu cita...' },
+    { clientId: null, contextType: AIContextType.KPI, inputSummary: 'Monthly KPI analysis request', outputSummary: 'Analysis complete: No-show rate improved by 5%, loyalty engagement up 12%' },
+    { clientId: clients[2].id, contextType: AIContextType.LOYALTY, inputSummary: 'Generated loyalty message for Thu Pham', outputSummary: 'Message in Vietnamese: Chào Thu! Bạn có 500 điểm...' },
+    { clientId: clients[3].id, contextType: AIContextType.REMINDER, inputSummary: 'Appointment reminder for Jennifer Smith', outputSummary: 'Reminder sent: Hi Jennifer! Your appointment is tomorrow at 2pm.' },
+    { clientId: clients[5].id, contextType: AIContextType.MULTILANG, inputSummary: 'Multi-language message for Michelle Lee in Korean', outputSummary: 'Korean translation: 안녕하세요 Michelle! 내일 예약이 있습니다.' },
+    { clientId: null, contextType: AIContextType.NOSHOW_PREDICT, inputSummary: 'No-show prediction for upcoming week', outputSummary: 'High risk: 3 clients flagged. Sandra Reyes (85%), Tina Chen (72%), Walk-in (65%)' },
+    { clientId: clients[1].id, contextType: AIContextType.SERVICE_RECOMMEND, inputSummary: 'Service recommendation for Amy Wong', outputSummary: 'Recommended: Gel French Manicure based on history. Upsell: Paraffin Treatment.' },
+    { clientId: null, contextType: AIContextType.STAFF_INSIGHTS, inputSummary: 'Staff performance analysis Q4', outputSummary: 'Top performer: Kim Tran (4.9 rating). Suggestion: Schedule training for Sarah Kim.' },
+    { clientId: null, contextType: AIContextType.MARKETING, inputSummary: 'Generate holiday promo copy', outputSummary: 'Holiday Special: Book any gel service and get 20% off! Limited time only.' },
+    { clientId: clients[8].id, contextType: AIContextType.VISIT_NOTES, inputSummary: 'Auto-generate visit notes for Hanh Nguyen', outputSummary: 'Almond shape, medium length, ombre pink-to-white design. Client satisfied.' },
+    { clientId: clients[4].id, contextType: AIContextType.RESCHEDULE, inputSummary: 'Reschedule suggestion for Linh Vo', outputSummary: 'Suggested slots: Tue 2pm, Wed 10am, Thu 3pm with preferred tech Kim Tran.' },
+    { clientId: null, contextType: AIContextType.REVIEW, inputSummary: 'Generate review response for 5-star Google review', outputSummary: 'Thank you for your wonderful review! We love having you as a client.' },
+    { clientId: clients[10].id, contextType: AIContextType.CHAT, inputSummary: 'Chat: Mai Tran asked about gel vs acrylic', outputSummary: 'Explained differences: Gel is thinner, more natural. Acrylic is stronger, longer-lasting.' },
+    { clientId: null, contextType: AIContextType.KPI, inputSummary: 'Weekly revenue trend analysis', outputSummary: 'Revenue up 12% WoW. Top services: Gel Manicure ($1,200), Spa Pedicure ($950).' },
+    { clientId: clients[15].id, contextType: AIContextType.LOYALTY, inputSummary: 'Tier upgrade notification for Grace Park', outputSummary: 'Congratulations Grace! You reached Gold tier. Enjoy 15% off your next visit!' },
+    { clientId: null, contextType: AIContextType.MARKETING, inputSummary: 'Generate SMS campaign for inactive clients', outputSummary: 'We miss you! Come back and enjoy $10 off any service. Book now at elegantnails.com' },
+    { clientId: clients[20].id, contextType: AIContextType.REMINDER, inputSummary: '2-hour reminder for Nga Bui', outputSummary: 'Vietnamese: Chào Nga! Nhắc nhở: Lịch hẹn của bạn trong 2 giờ nữa.' },
+    { clientId: null, contextType: AIContextType.STAFF_INSIGHTS, inputSummary: 'Optimal scheduling analysis', outputSummary: 'Peak hours: 11am-2pm. Suggested: Add 1 more tech on Saturdays for wait reduction.' },
+  ];
+  const auditLogs = await Promise.all(
+    auditLogsData.map((log, i) => prisma.aIAuditLog.create({
       data: {
         salonId: salon.id,
-        clientId: clients[0].id,
-        contextType: AIContextType.REMINDER,
-        inputSummary: 'Generated appointment reminder for Jessica Martinez - Gel Manicure',
-        outputSummary: 'Reminder sent in Spanish: Hola Jessica! Recordatorio de tu cita...',
+        clientId: log.clientId,
+        contextType: log.contextType,
+        inputSummary: log.inputSummary,
+        outputSummary: log.outputSummary,
+        createdAt: subDays(now, i * 2),
       },
-    }),
-    prisma.aIAuditLog.create({
-      data: {
-        salonId: salon.id,
-        contextType: AIContextType.KPI,
-        inputSummary: 'Monthly KPI analysis request',
-        outputSummary: 'Analysis complete: No-show rate improved by 5%, loyalty engagement up 12%',
-      },
-    }),
-    prisma.aIAuditLog.create({
-      data: {
-        salonId: salon.id,
-        clientId: clients[2].id,
-        contextType: AIContextType.LOYALTY,
-        inputSummary: 'Generated loyalty message for Thu Pham',
-        outputSummary: 'Message in Vietnamese: Chào Thu! Bạn có 500 điểm...',
-      },
-    }),
-  ]);
+    }))
+  );
   console.log('Created', auditLogs.length, 'AI audit logs');
 
   // ============================================================

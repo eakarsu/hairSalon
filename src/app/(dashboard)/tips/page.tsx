@@ -18,7 +18,6 @@ import {
   Select,
   MenuItem,
   Chip,
-  CircularProgress,
   Alert,
   Table,
   TableBody,
@@ -32,14 +31,23 @@ import {
   InputAdornment,
   Autocomplete,
   LinearProgress,
+  Drawer,
+  Divider,
+  IconButton,
 } from '@mui/material';
 import {
   Add as AddIcon,
   MonetizationOn as TipIcon,
   CreditCard as CardIcon,
   Money as CashIcon,
+  Close as CloseIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
+import { useToast } from '@/components/ToastProvider';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { TableSkeleton, CardsSkeleton } from '@/components/LoadingSkeleton';
 
 interface Technician {
   id: string;
@@ -108,6 +116,23 @@ export default function TipsPage() {
     method: 'CASH' as 'CASH' | 'CARD' | 'GIFT_CARD' | 'OTHER',
   });
 
+  // Detail drawer state
+  const [selectedTip, setSelectedTip] = useState<Tip | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    amount: '',
+    method: 'CASH' as 'CASH' | 'CARD' | 'GIFT_CARD' | 'OTHER',
+  });
+
+  // Confirm dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+
+  const { showSuccess, showError } = useToast();
+
   useEffect(() => {
     fetchData();
   }, [period, filterTech]);
@@ -134,6 +159,7 @@ export default function TipsPage() {
       setTodayAppointments(appointmentsData.appointments || []);
     } catch {
       setError('Failed to load tips');
+      showError('Failed to load tips');
     } finally {
       setLoading(false);
     }
@@ -154,9 +180,79 @@ export default function TipsPage() {
 
       setDialogOpen(false);
       setFormData({ appointmentId: '', technicianId: '', amount: '', method: 'CASH' });
+      showSuccess('Tip recorded successfully');
       fetchData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add tip');
+      const message = err instanceof Error ? err.message : 'Failed to add tip';
+      setError(message);
+      showError(message);
+    }
+  };
+
+  const handleRowClick = (tip: Tip) => {
+    setSelectedTip(tip);
+    setDrawerOpen(true);
+  };
+
+  const handleCloseDrawer = () => {
+    setDrawerOpen(false);
+    setSelectedTip(null);
+  };
+
+  const handleEditOpen = () => {
+    if (!selectedTip) return;
+    setEditFormData({
+      amount: selectedTip.amount.toString(),
+      method: selectedTip.method,
+    });
+    setEditDialogOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!selectedTip) return;
+    try {
+      const res = await fetch(`/api/tips`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedTip.id,
+          amount: parseFloat(editFormData.amount),
+          method: editFormData.method,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Failed to update tip');
+
+      setEditDialogOpen(false);
+      setDrawerOpen(false);
+      setSelectedTip(null);
+      showSuccess('Tip updated successfully');
+      fetchData();
+    } catch {
+      showError('Failed to update tip');
+    }
+  };
+
+  const handleDeleteClick = () => {
+    setConfirmOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!selectedTip) return;
+    setConfirmLoading(true);
+    try {
+      const res = await fetch(`/api/tips?id=${selectedTip.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete tip');
+
+      setConfirmOpen(false);
+      setDrawerOpen(false);
+      setSelectedTip(null);
+      showSuccess('Tip deleted successfully');
+      fetchData();
+    } catch {
+      showError('Failed to delete tip');
+    } finally {
+      setConfirmLoading(false);
     }
   };
 
@@ -186,8 +282,14 @@ export default function TipsPage() {
 
   if (loading && !summary) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-        <CircularProgress />
+      <Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h4">Tips Tracking</Typography>
+        </Box>
+        <CardsSkeleton count={4} />
+        <Box sx={{ mt: 3 }}>
+          <TableSkeleton rows={5} columns={5} />
+        </Box>
       </Box>
     );
   }
@@ -378,7 +480,12 @@ export default function TipsPage() {
                     </TableHead>
                     <TableBody>
                       {tips.slice(0, 10).map((tip) => (
-                        <TableRow key={tip.id}>
+                        <TableRow
+                          key={tip.id}
+                          hover
+                          sx={{ cursor: 'pointer' }}
+                          onClick={() => handleRowClick(tip)}
+                        >
                           <TableCell>
                             {format(new Date(tip.createdAt), 'h:mm a')}
                           </TableCell>
@@ -478,6 +585,153 @@ export default function TipsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Detail Drawer */}
+      <Drawer
+        anchor="right"
+        open={drawerOpen}
+        onClose={handleCloseDrawer}
+        PaperProps={{ sx: { width: 400 } }}
+      >
+        {selectedTip && (
+          <Box sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6">Tip Details</Typography>
+              <IconButton onClick={handleCloseDrawer}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
+            <Divider sx={{ mb: 3 }} />
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Tip ID</Typography>
+                <Typography variant="body2" fontWeight={500}>{selectedTip.id}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Amount</Typography>
+                <Typography variant="h5" fontWeight={600} color="success.main">
+                  ${selectedTip.amount.toFixed(2)}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Payment Method</Typography>
+                <Box sx={{ mt: 0.5 }}>
+                  <Chip
+                    label={selectedTip.method}
+                    color={selectedTip.method === 'CASH' ? 'success' : 'primary'}
+                    size="small"
+                  />
+                </Box>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Technician</Typography>
+                <Typography variant="body2" fontWeight={500}>
+                  {selectedTip.technician?.name || 'Unknown'}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Client</Typography>
+                <Typography variant="body2" fontWeight={500}>
+                  {selectedTip.appointment?.client?.name || 'Unknown'}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Service</Typography>
+                <Typography variant="body2" fontWeight={500}>
+                  {selectedTip.appointment?.service?.name || 'Unknown'}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Appointment ID</Typography>
+                <Typography variant="body2">{selectedTip.appointment?.id || '-'}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="caption" color="text.secondary">Date</Typography>
+                <Typography variant="body2">
+                  {format(new Date(selectedTip.createdAt), 'MMM d, yyyy h:mm a')}
+                </Typography>
+              </Box>
+            </Box>
+
+            <Divider sx={{ my: 3 }} />
+
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Button
+                variant="outlined"
+                startIcon={<EditIcon />}
+                onClick={handleEditOpen}
+                fullWidth
+              >
+                Edit
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                onClick={handleDeleteClick}
+                fullWidth
+              >
+                Delete
+              </Button>
+            </Box>
+          </Box>
+        )}
+      </Drawer>
+
+      {/* Edit Tip Dialog */}
+      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Tip</DialogTitle>
+        <DialogContent>
+          <TextField
+            fullWidth
+            required
+            type="number"
+            label="Tip Amount"
+            value={editFormData.amount}
+            onChange={(e) => setEditFormData((prev) => ({ ...prev, amount: e.target.value }))}
+            sx={{ mt: 2, mb: 2 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+            }}
+          />
+          <FormControl fullWidth>
+            <InputLabel>Payment Method</InputLabel>
+            <Select
+              value={editFormData.method}
+              label="Payment Method"
+              onChange={(e) =>
+                setEditFormData((prev) => ({
+                  ...prev,
+                  method: e.target.value as 'CASH' | 'CARD' | 'GIFT_CARD' | 'OTHER',
+                }))
+              }
+            >
+              <MenuItem value="CASH">Cash</MenuItem>
+              <MenuItem value="CARD">Card</MenuItem>
+              <MenuItem value="OTHER">Other</MenuItem>
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleEditSave} disabled={!editFormData.amount}>
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirm Delete Dialog */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Delete Tip"
+        message={`Are you sure you want to delete this $${selectedTip?.amount.toFixed(2)} tip? This action cannot be undone.`}
+        confirmText="Delete"
+        variant="danger"
+        loading={confirmLoading}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </Box>
   );
 }

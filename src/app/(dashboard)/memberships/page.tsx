@@ -23,7 +23,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  CircularProgress,
   Grid,
   Card,
   CardContent,
@@ -34,6 +33,9 @@ import {
   ListItemIcon,
   ListItemText,
   InputAdornment,
+  Drawer,
+  Divider,
+  Stack,
 } from '@mui/material';
 import {
   Add,
@@ -45,7 +47,16 @@ import {
   Pause,
   PlayArrow,
   Cancel,
+  Close,
+  CalendarMonth,
+  Phone,
+  Email,
+  CreditCard,
+  EventRepeat,
 } from '@mui/icons-material';
+import { useToast } from '@/components/ToastProvider';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { TableSkeleton, CardsSkeleton } from '@/components/LoadingSkeleton';
 
 interface MembershipPlan {
   id: string;
@@ -78,6 +89,8 @@ const statusColors: Record<string, 'success' | 'warning' | 'error' | 'default'> 
 };
 
 export default function MembershipsPage() {
+  const { showSuccess, showError } = useToast();
+
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [summary, setSummary] = useState({ active: 0, paused: 0, cancelled: 0, monthlyRevenue: 0 });
@@ -101,6 +114,35 @@ export default function MembershipsPage() {
     billingCycle: 'MONTHLY',
   });
 
+  // Detail Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedMembership, setSelectedMembership] = useState<Membership | null>(null);
+
+  // Edit Dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    planId: '',
+    billingCycle: '',
+  });
+
+  // Confirm dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    variant: 'danger' | 'warning' | 'info' | 'success';
+    confirmText: string;
+    onConfirm: () => void;
+  }>({
+    open: false,
+    title: '',
+    message: '',
+    variant: 'danger',
+    confirmText: 'Confirm',
+    onConfirm: () => {},
+  });
+  const [confirmLoading, setConfirmLoading] = useState(false);
+
   useEffect(() => {
     fetchPlans();
     fetchMemberships();
@@ -116,6 +158,7 @@ export default function MembershipsPage() {
       }
     } catch (error) {
       console.error('Failed to fetch plans:', error);
+      showError('Failed to load membership plans');
     }
   };
 
@@ -129,6 +172,7 @@ export default function MembershipsPage() {
       }
     } catch (error) {
       console.error('Failed to fetch memberships:', error);
+      showError('Failed to load memberships');
     } finally {
       setLoading(false);
     }
@@ -171,8 +215,10 @@ export default function MembershipsPage() {
         benefits: [''],
       });
       fetchPlans();
+      showSuccess('Membership plan created successfully');
     } catch (error) {
       console.error('Failed to save plan:', error);
+      showError('Failed to create membership plan');
     } finally {
       setSaving(false);
     }
@@ -195,24 +241,162 @@ export default function MembershipsPage() {
       setEnrollDialogOpen(false);
       setEnrollForm({ planId: '', clientId: '', billingCycle: 'MONTHLY' });
       fetchMemberships();
+      showSuccess('Client enrolled successfully');
     } catch (error) {
       console.error('Failed to enroll:', error);
+      showError('Failed to enroll client');
     } finally {
       setSaving(false);
     }
   };
 
   const handleMembershipAction = async (id: string, action: string) => {
+    setConfirmLoading(true);
     try {
-      await fetch('/api/memberships', {
+      const response = await fetch('/api/memberships', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action }),
       });
-      fetchMemberships();
+
+      if (!response.ok) throw new Error(`Failed to ${action} membership`);
+
+      await fetchMemberships();
+
+      // Update the selected membership in the drawer if it matches
+      if (selectedMembership && selectedMembership.id === id) {
+        const updated = memberships.find(m => m.id === id);
+        // Re-fetch to get the latest state - find the updated one
+        const refetchRes = await fetch('/api/memberships?type=members');
+        if (refetchRes.ok) {
+          const data = await refetchRes.json();
+          const updatedMembership = (data.memberships || []).find((m: Membership) => m.id === id);
+          if (updatedMembership) {
+            setSelectedMembership(updatedMembership);
+          } else {
+            // membership might have been removed from list, close drawer
+            setDrawerOpen(false);
+            setSelectedMembership(null);
+          }
+        }
+      }
+
+      const actionLabels: Record<string, string> = {
+        pause: 'Membership paused',
+        resume: 'Membership resumed',
+        cancel: 'Membership cancelled',
+      };
+      showSuccess(actionLabels[action] || 'Membership updated');
     } catch (error) {
       console.error('Failed to update membership:', error);
+      showError(`Failed to ${action} membership`);
+    } finally {
+      setConfirmLoading(false);
+      setConfirmDialog(prev => ({ ...prev, open: false }));
     }
+  };
+
+  const handleEditMembership = async () => {
+    if (!selectedMembership) return;
+    setSaving(true);
+    try {
+      const response = await fetch('/api/memberships', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: selectedMembership.id,
+          action: 'update',
+          planId: editForm.planId,
+          billingCycle: editForm.billingCycle,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to update');
+
+      setEditDialogOpen(false);
+      await fetchMemberships();
+
+      // Refresh the drawer with updated data
+      const refetchRes = await fetch('/api/memberships?type=members');
+      if (refetchRes.ok) {
+        const data = await refetchRes.json();
+        const updatedMembership = (data.memberships || []).find(
+          (m: Membership) => m.id === selectedMembership.id
+        );
+        if (updatedMembership) {
+          setSelectedMembership(updatedMembership);
+        }
+      }
+
+      showSuccess('Membership updated successfully');
+    } catch (error) {
+      console.error('Failed to update membership:', error);
+      showError('Failed to update membership');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openConfirmAction = (
+    membership: Membership,
+    action: string,
+    e?: React.MouseEvent
+  ) => {
+    if (e) e.stopPropagation();
+
+    const configs: Record<string, {
+      title: string;
+      message: string;
+      variant: 'danger' | 'warning' | 'info' | 'success';
+      confirmText: string;
+    }> = {
+      pause: {
+        title: 'Pause Membership',
+        message: `Are you sure you want to pause ${membership.client.name}'s "${membership.plan.name}" membership? Billing will be suspended until resumed.`,
+        variant: 'warning',
+        confirmText: 'Pause Membership',
+      },
+      resume: {
+        title: 'Resume Membership',
+        message: `Resume ${membership.client.name}'s "${membership.plan.name}" membership? Billing will restart from the next cycle.`,
+        variant: 'success',
+        confirmText: 'Resume Membership',
+      },
+      cancel: {
+        title: 'Cancel Membership',
+        message: `Are you sure you want to cancel ${membership.client.name}'s "${membership.plan.name}" membership? This action cannot be undone.`,
+        variant: 'danger',
+        confirmText: 'Cancel Membership',
+      },
+    };
+
+    const config = configs[action];
+    if (!config) return;
+
+    setConfirmDialog({
+      open: true,
+      ...config,
+      onConfirm: () => handleMembershipAction(membership.id, action),
+    });
+  };
+
+  const openDrawer = (membership: Membership) => {
+    setSelectedMembership(membership);
+    setDrawerOpen(true);
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setSelectedMembership(null);
+  };
+
+  const openEditDialog = () => {
+    if (!selectedMembership) return;
+    setEditForm({
+      planId: selectedMembership.plan.id,
+      billingCycle: selectedMembership.billingCycle,
+    });
+    setEditDialogOpen(true);
   };
 
   const addBenefit = () => {
@@ -252,52 +436,58 @@ export default function MembershipsPage() {
       </Box>
 
       {/* Stats Cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <CardMembership color="primary" />
-                <Typography variant="body2" color="text.secondary">Active Members</Typography>
-              </Box>
-              <Typography variant="h4">{summary.active}</Typography>
-            </CardContent>
-          </Card>
+      {loading ? (
+        <Box sx={{ mb: 3 }}>
+          <CardsSkeleton count={4} />
+        </Box>
+      ) : (
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <CardMembership color="primary" />
+                  <Typography variant="body2" color="text.secondary">Active Members</Typography>
+                </Box>
+                <Typography variant="h4">{summary.active}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Pause color="warning" />
+                  <Typography variant="body2" color="text.secondary">Paused</Typography>
+                </Box>
+                <Typography variant="h4">{summary.paused}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <AttachMoney color="success" />
+                  <Typography variant="body2" color="text.secondary">Monthly Revenue</Typography>
+                </Box>
+                <Typography variant="h4">${summary.monthlyRevenue.toFixed(2)}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <People color="info" />
+                  <Typography variant="body2" color="text.secondary">Total Plans</Typography>
+                </Box>
+                <Typography variant="h4">{plans.length}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <Pause color="warning" />
-                <Typography variant="body2" color="text.secondary">Paused</Typography>
-              </Box>
-              <Typography variant="h4">{summary.paused}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <AttachMoney color="success" />
-                <Typography variant="body2" color="text.secondary">Monthly Revenue</Typography>
-              </Box>
-              <Typography variant="h4">${summary.monthlyRevenue.toFixed(2)}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <People color="info" />
-                <Typography variant="body2" color="text.secondary">Total Plans</Typography>
-              </Box>
-              <Typography variant="h4">{plans.length}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      )}
 
       <Paper sx={{ p: 2 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
@@ -309,9 +499,7 @@ export default function MembershipsPage() {
         </Box>
 
         {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
-          </Box>
+          <TableSkeleton rows={5} columns={6} />
         ) : (
           <>
             {selectedTab === 0 && (
@@ -375,6 +563,7 @@ export default function MembershipsPage() {
                       <TableCell>Client</TableCell>
                       <TableCell>Plan</TableCell>
                       <TableCell>Status</TableCell>
+                      <TableCell>Billing</TableCell>
                       <TableCell>Start Date</TableCell>
                       <TableCell>Next Bill</TableCell>
                       <TableCell align="right">Actions</TableCell>
@@ -382,7 +571,12 @@ export default function MembershipsPage() {
                   </TableHead>
                   <TableBody>
                     {memberships.map((membership) => (
-                      <TableRow key={membership.id} hover>
+                      <TableRow
+                        key={membership.id}
+                        hover
+                        onClick={() => openDrawer(membership)}
+                        sx={{ cursor: 'pointer' }}
+                      >
                         <TableCell>
                           <Box>
                             <Typography variant="body2" fontWeight={500}>
@@ -397,7 +591,7 @@ export default function MembershipsPage() {
                           <Box>
                             <Typography variant="body2">{membership.plan.name}</Typography>
                             <Typography variant="caption" color="text.secondary">
-                              ${membership.plan.monthlyPrice}/mo • {membership.plan.discountPercent}% off
+                              ${membership.plan.monthlyPrice}/mo
                             </Typography>
                           </Box>
                         </TableCell>
@@ -406,6 +600,13 @@ export default function MembershipsPage() {
                             label={membership.status}
                             size="small"
                             color={statusColors[membership.status]}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={membership.billingCycle}
+                            size="small"
+                            variant="outlined"
                           />
                         </TableCell>
                         <TableCell>
@@ -420,7 +621,7 @@ export default function MembershipsPage() {
                           {membership.status === 'ACTIVE' && (
                             <IconButton
                               size="small"
-                              onClick={() => handleMembershipAction(membership.id, 'pause')}
+                              onClick={(e) => openConfirmAction(membership, 'pause', e)}
                               title="Pause"
                             >
                               <Pause />
@@ -429,7 +630,7 @@ export default function MembershipsPage() {
                           {membership.status === 'PAUSED' && (
                             <IconButton
                               size="small"
-                              onClick={() => handleMembershipAction(membership.id, 'resume')}
+                              onClick={(e) => openConfirmAction(membership, 'resume', e)}
                               title="Resume"
                             >
                               <PlayArrow />
@@ -439,7 +640,7 @@ export default function MembershipsPage() {
                             <IconButton
                               size="small"
                               color="error"
-                              onClick={() => handleMembershipAction(membership.id, 'cancel')}
+                              onClick={(e) => openConfirmAction(membership, 'cancel', e)}
                               title="Cancel"
                             >
                               <Cancel />
@@ -450,7 +651,7 @@ export default function MembershipsPage() {
                     ))}
                     {memberships.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} align="center">
+                        <TableCell colSpan={7} align="center">
                           <Typography color="text.secondary" sx={{ py: 4 }}>
                             No members enrolled yet.
                           </Typography>
@@ -464,6 +665,293 @@ export default function MembershipsPage() {
           </>
         )}
       </Paper>
+
+      {/* Membership Detail Drawer */}
+      <Drawer
+        anchor="right"
+        open={drawerOpen}
+        onClose={closeDrawer}
+        PaperProps={{ sx: { width: { xs: '100%', sm: 420 } } }}
+      >
+        {selectedMembership && (
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* Drawer Header */}
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                p: 2,
+                borderBottom: 1,
+                borderColor: 'divider',
+              }}
+            >
+              <Typography variant="h6" fontWeight={600}>
+                Membership Details
+              </Typography>
+              <IconButton onClick={closeDrawer} size="small">
+                <Close />
+              </IconButton>
+            </Box>
+
+            {/* Drawer Content */}
+            <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
+              {/* Client Info */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="overline" color="text.secondary">
+                  Client
+                </Typography>
+                <Typography variant="h5" fontWeight={600} sx={{ mt: 0.5 }}>
+                  {selectedMembership.client.name}
+                </Typography>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1 }}>
+                  <Phone fontSize="small" color="action" />
+                  <Typography variant="body2" color="text.secondary">
+                    {selectedMembership.client.phone}
+                  </Typography>
+                </Stack>
+                {selectedMembership.client.email && (
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 0.5 }}>
+                    <Email fontSize="small" color="action" />
+                    <Typography variant="body2" color="text.secondary">
+                      {selectedMembership.client.email}
+                    </Typography>
+                  </Stack>
+                )}
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              {/* Status */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="overline" color="text.secondary">
+                  Status
+                </Typography>
+                <Box sx={{ mt: 0.5 }}>
+                  <Chip
+                    label={selectedMembership.status}
+                    color={statusColors[selectedMembership.status]}
+                    sx={{ fontWeight: 600 }}
+                  />
+                </Box>
+              </Box>
+
+              {/* Plan Info */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="overline" color="text.secondary">
+                  Plan
+                </Typography>
+                <Box
+                  sx={{
+                    mt: 0.5,
+                    p: 2,
+                    bgcolor: 'action.hover',
+                    borderRadius: 1,
+                  }}
+                >
+                  <Typography variant="subtitle1" fontWeight={600}>
+                    {selectedMembership.plan.name}
+                  </Typography>
+                  <Typography variant="h5" color="primary" sx={{ mt: 0.5 }}>
+                    ${selectedMembership.plan.monthlyPrice.toFixed(2)}
+                    <Typography component="span" variant="body2" color="text.secondary">
+                      /mo
+                    </Typography>
+                  </Typography>
+                  <Chip
+                    label={`${selectedMembership.plan.discountPercent}% off services`}
+                    color="success"
+                    size="small"
+                    sx={{ mt: 1 }}
+                  />
+                </Box>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              {/* Billing Details */}
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="overline" color="text.secondary">
+                  Billing Details
+                </Typography>
+                <Stack spacing={1.5} sx={{ mt: 1 }}>
+                  <Stack direction="row" alignItems="center" spacing={1.5}>
+                    <CreditCard fontSize="small" color="action" />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Billing Cycle
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500}>
+                        {selectedMembership.billingCycle === 'MONTHLY' ? 'Monthly' : 'Annual'}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                  <Stack direction="row" alignItems="center" spacing={1.5}>
+                    <CalendarMonth fontSize="small" color="action" />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Start Date
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500}>
+                        {new Date(selectedMembership.startDate).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                        })}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                  {selectedMembership.nextBillDate && (
+                    <Stack direction="row" alignItems="center" spacing={1.5}>
+                      <EventRepeat fontSize="small" color="action" />
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          Next Billing Date
+                        </Typography>
+                        <Typography variant="body2" fontWeight={500}>
+                          {new Date(selectedMembership.nextBillDate).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                          })}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  )}
+                  {selectedMembership.endDate && (
+                    <Stack direction="row" alignItems="center" spacing={1.5}>
+                      <CalendarMonth fontSize="small" color="error" />
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          End Date
+                        </Typography>
+                        <Typography variant="body2" fontWeight={500} color="error">
+                          {new Date(selectedMembership.endDate).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                          })}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  )}
+                </Stack>
+              </Box>
+            </Box>
+
+            {/* Drawer Footer - Action Buttons */}
+            <Box
+              sx={{
+                p: 2,
+                borderTop: 1,
+                borderColor: 'divider',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1.5,
+              }}
+            >
+              <Button
+                variant="outlined"
+                startIcon={<Edit />}
+                fullWidth
+                onClick={openEditDialog}
+              >
+                Edit Membership
+              </Button>
+
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                {selectedMembership.status === 'ACTIVE' && (
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    startIcon={<Pause />}
+                    fullWidth
+                    onClick={() => openConfirmAction(selectedMembership, 'pause')}
+                  >
+                    Pause
+                  </Button>
+                )}
+                {selectedMembership.status === 'PAUSED' && (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    startIcon={<PlayArrow />}
+                    fullWidth
+                    onClick={() => openConfirmAction(selectedMembership, 'resume')}
+                  >
+                    Resume
+                  </Button>
+                )}
+                {selectedMembership.status !== 'CANCELLED' && selectedMembership.status !== 'EXPIRED' && (
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    startIcon={<Cancel />}
+                    fullWidth
+                    onClick={() => openConfirmAction(selectedMembership, 'cancel')}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </Box>
+            </Box>
+          </Box>
+        )}
+      </Drawer>
+
+      {/* Edit Membership Dialog */}
+      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Membership</DialogTitle>
+        <DialogContent>
+          <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {selectedMembership && (
+              <Box sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 1, mb: 1 }}>
+                <Typography variant="body2" color="text.secondary">
+                  Client
+                </Typography>
+                <Typography variant="subtitle1" fontWeight={600}>
+                  {selectedMembership.client.name}
+                </Typography>
+              </Box>
+            )}
+            <FormControl fullWidth>
+              <InputLabel>Plan</InputLabel>
+              <Select
+                label="Plan"
+                value={editForm.planId}
+                onChange={(e) => setEditForm({ ...editForm, planId: e.target.value })}
+              >
+                {plans.map((plan) => (
+                  <MenuItem key={plan.id} value={plan.id}>
+                    {plan.name} - ${plan.monthlyPrice}/mo
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>Billing Cycle</InputLabel>
+              <Select
+                label="Billing Cycle"
+                value={editForm.billingCycle}
+                onChange={(e) => setEditForm({ ...editForm, billingCycle: e.target.value })}
+              >
+                <MenuItem value="MONTHLY">Monthly</MenuItem>
+                <MenuItem value="ANNUAL">Annual</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleEditMembership}
+            disabled={saving || !editForm.planId || !editForm.billingCycle}
+          >
+            {saving ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Create Plan Dialog */}
       <Dialog open={planDialogOpen} onClose={() => setPlanDialogOpen(false)} maxWidth="sm" fullWidth>
@@ -601,6 +1089,18 @@ export default function MembershipsPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        open={confirmDialog.open}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        variant={confirmDialog.variant}
+        confirmText={confirmDialog.confirmText}
+        loading={confirmLoading}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, open: false }))}
+      />
     </Box>
   );
 }

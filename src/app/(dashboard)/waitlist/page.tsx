@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -19,21 +19,38 @@ import {
   Select,
   MenuItem,
   Chip,
-  CircularProgress,
   Alert,
   Paper,
   Divider,
+  Drawer,
+  Checkbox,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
-  PersonAdd as PersonAddIcon,
   Notifications as NotifyIcon,
   Chair as SeatIcon,
-  Close as CancelIcon,
+  Close as CloseIcon,
   AccessTime as TimeIcon,
   Phone as PhoneIcon,
+  Delete as DeleteIcon,
+  Person as PersonIcon,
+  Notes as NotesIcon,
+  Group as GroupIcon,
+  CalendarToday as CalendarIcon,
+  CheckBoxOutlineBlank,
+  CheckBox as CheckBoxIcon,
 } from '@mui/icons-material';
 import { format, formatDistanceToNow } from 'date-fns';
+import { useToast } from '@/components/ToastProvider';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { TableSkeleton, CardsSkeleton } from '@/components/LoadingSkeleton';
 
 type WaitlistStatus = 'WAITING' | 'NOTIFIED' | 'SEATED' | 'LEFT' | 'CANCELLED';
 
@@ -89,14 +106,27 @@ export default function WaitlistPage() {
     notes: '',
   });
 
-  useEffect(() => {
-    fetchData();
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  // Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedEntry, setSelectedEntry] = useState<WaitlistEntry | null>(null);
 
-  const fetchData = async () => {
+  // Bulk select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Confirm dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    message: string;
+    variant: 'danger' | 'warning' | 'info' | 'success';
+    confirmText: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+
+  const { showSuccess, showError, showInfo } = useToast();
+
+  const fetchData = useCallback(async () => {
     try {
       const [waitlistRes, servicesRes, techRes] = await Promise.all([
         fetch('/api/waitlist?today=true'),
@@ -116,7 +146,14 @@ export default function WaitlistPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   const handleAdd = async () => {
     try {
@@ -137,140 +174,180 @@ export default function WaitlistPage() {
         preferredTech: '',
         notes: '',
       });
+      showSuccess(`${formData.clientName} added to waitlist`);
       fetchData();
     } catch {
-      setError('Failed to add to waitlist');
+      showError('Failed to add to waitlist');
     }
   };
 
   const handleStatusChange = async (id: string, status: WaitlistStatus) => {
     try {
-      await fetch(`/api/waitlist/${id}`, {
+      const res = await fetch(`/api/waitlist/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
+      if (!res.ok) throw new Error('Failed to update');
+
+      const entry = entries.find((e) => e.id === id);
+      const name = entry?.clientName || 'Entry';
+      const statusLabel = STATUS_CONFIG[status].label.toLowerCase();
+      showSuccess(`${name} marked as ${statusLabel}`);
+
+      // Update the selected entry if it is the one being changed
+      if (selectedEntry?.id === id) {
+        setSelectedEntry((prev) => (prev ? { ...prev, status } : null));
+      }
+
       fetchData();
     } catch {
-      setError('Failed to update status');
+      showError('Failed to update status');
     }
   };
 
   const handleRemove = async (id: string) => {
-    try {
-      await fetch(`/api/waitlist/${id}`, { method: 'DELETE' });
-      fetchData();
-    } catch {
-      setError('Failed to remove');
+    const entry = entries.find((e) => e.id === id);
+    setConfirmAction({
+      title: 'Remove from Waitlist',
+      message: `Are you sure you want to remove ${entry?.clientName || 'this entry'} from the waitlist? This action cannot be undone.`,
+      variant: 'danger',
+      confirmText: 'Remove',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/waitlist/${id}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error('Failed to remove');
+          showSuccess(`${entry?.clientName || 'Entry'} removed from waitlist`);
+          if (selectedEntry?.id === id) {
+            setDrawerOpen(false);
+            setSelectedEntry(null);
+          }
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          fetchData();
+        } catch {
+          showError('Failed to remove from waitlist');
+        }
+      },
+    });
+    setConfirmOpen(true);
+  };
+
+  const handleBulkDelete = () => {
+    if (selectedIds.size === 0) {
+      showInfo('No entries selected');
+      return;
     }
+    setConfirmAction({
+      title: 'Bulk Delete',
+      message: `Are you sure you want to remove ${selectedIds.size} waitlist ${selectedIds.size === 1 ? 'entry' : 'entries'}? This action cannot be undone.`,
+      variant: 'danger',
+      confirmText: `Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'Entry' : 'Entries'}`,
+      onConfirm: async () => {
+        try {
+          const res = await fetch('/api/bulk', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: Array.from(selectedIds), type: 'waitlist' }),
+          });
+          if (!res.ok) throw new Error('Failed to bulk delete');
+          const data = await res.json();
+          showSuccess(`${data.deletedCount} ${data.deletedCount === 1 ? 'entry' : 'entries'} removed`);
+          if (selectedEntry && selectedIds.has(selectedEntry.id)) {
+            setDrawerOpen(false);
+            setSelectedEntry(null);
+          }
+          setSelectedIds(new Set());
+          fetchData();
+        } catch {
+          showError('Failed to delete selected entries');
+        }
+      },
+    });
+    setConfirmOpen(true);
+  };
+
+  const handleConfirm = async () => {
+    if (!confirmAction) return;
+    setConfirmLoading(true);
+    try {
+      await confirmAction.onConfirm();
+    } finally {
+      setConfirmLoading(false);
+      setConfirmOpen(false);
+      setConfirmAction(null);
+    }
+  };
+
+  const handleRowClick = (entry: WaitlistEntry) => {
+    setSelectedEntry(entry);
+    setDrawerOpen(true);
+  };
+
+  // Bulk selection helpers
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === entries.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(entries.map((e) => e.id)));
+    }
+  };
+
+  // Helper to find service name by id
+  const getServiceName = (serviceId: string | null): string | null => {
+    if (!serviceId) return null;
+    const svc = services.find((s) => s.id === serviceId);
+    return svc ? svc.name : null;
+  };
+
+  // Helper to find technician name by id
+  const getTechName = (techId: string | null): string | null => {
+    if (!techId) return null;
+    const tech = technicians.find((t) => t.id === techId);
+    return tech ? tech.name : null;
   };
 
   const waitingEntries = entries.filter((e) => e.status === 'WAITING');
   const notifiedEntries = entries.filter((e) => e.status === 'NOTIFIED');
   const completedEntries = entries.filter((e) => ['SEATED', 'LEFT', 'CANCELLED'].includes(e.status));
 
-  const WaitlistCard = ({ entry, position }: { entry: WaitlistEntry; position?: number }) => (
-    <Card
-      sx={{
-        mb: 2,
-        borderLeft: 4,
-        borderColor: `${STATUS_CONFIG[entry.status].color}.main`,
-      }}
-    >
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-              {position && (
-                <Chip
-                  size="small"
-                  label={`#${position}`}
-                  color="primary"
-                  sx={{ fontWeight: 'bold' }}
-                />
-              )}
-              <Typography variant="h6">{entry.clientName}</Typography>
-              <Chip
-                size="small"
-                label={STATUS_CONFIG[entry.status].label}
-                color={STATUS_CONFIG[entry.status].color}
-              />
-            </Box>
-
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'text.secondary' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <PhoneIcon fontSize="small" />
-                <Typography variant="body2">{entry.clientPhone}</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <TimeIcon fontSize="small" />
-                <Typography variant="body2">
-                  {formatDistanceToNow(new Date(entry.createdAt), { addSuffix: true })}
-                </Typography>
-              </Box>
-              {entry.partySize > 1 && (
-                <Typography variant="body2">Party of {entry.partySize}</Typography>
-              )}
-            </Box>
-
-            {entry.notes && (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Note: {entry.notes}
-              </Typography>
-            )}
-          </Box>
-
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            {entry.status === 'WAITING' && (
-              <>
-                <IconButton
-                  color="info"
-                  onClick={() => handleStatusChange(entry.id, 'NOTIFIED')}
-                  title="Notify client"
-                >
-                  <NotifyIcon />
-                </IconButton>
-                <IconButton
-                  color="success"
-                  onClick={() => handleStatusChange(entry.id, 'SEATED')}
-                  title="Seat client"
-                >
-                  <SeatIcon />
-                </IconButton>
-              </>
-            )}
-            {entry.status === 'NOTIFIED' && (
-              <IconButton
-                color="success"
-                onClick={() => handleStatusChange(entry.id, 'SEATED')}
-                title="Seat client"
-              >
-                <SeatIcon />
-              </IconButton>
-            )}
-            <IconButton
-              color="error"
-              onClick={() => handleRemove(entry.id)}
-              title="Remove"
-            >
-              <CancelIcon />
-            </IconButton>
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
-  );
-
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-        <CircularProgress />
+      <Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Box>
+            <Typography variant="h4">Waitlist</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {format(new Date(), 'EEEE, MMMM d, yyyy')}
+            </Typography>
+          </Box>
+        </Box>
+        <CardsSkeleton count={3} />
+        <Box sx={{ mt: 4 }}>
+          <TableSkeleton rows={6} columns={7} />
+        </Box>
       </Box>
     );
   }
 
   return (
     <Box>
+      {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
           <Typography variant="h4">Waitlist</Typography>
@@ -278,9 +355,21 @@ export default function WaitlistPage() {
             {format(new Date(), 'EEEE, MMMM d, yyyy')}
           </Typography>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
-          Add to Waitlist
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {selectedIds.size > 0 && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={handleBulkDelete}
+            >
+              Delete ({selectedIds.size})
+            </Button>
+          )}
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+            Add to Waitlist
+          </Button>
+        </Box>
       </Box>
 
       {error && (
@@ -289,7 +378,7 @@ export default function WaitlistPage() {
         </Alert>
       )}
 
-      {/* Summary */}
+      {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 4 }}>
         <Grid size={{ xs: 12, sm: 4 }}>
           <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'warning.50' }}>
@@ -317,53 +406,384 @@ export default function WaitlistPage() {
         </Grid>
       </Grid>
 
-      <Grid container spacing={3}>
-        {/* Waiting Queue */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <TimeIcon color="warning" />
-            Waiting ({waitingEntries.length})
+      {/* Waitlist Table */}
+      {entries.length === 0 ? (
+        <Card sx={{ p: 4, textAlign: 'center' }}>
+          <Typography color="text.secondary" variant="h6">
+            No waitlist entries today
           </Typography>
-          {waitingEntries.length === 0 ? (
-            <Card sx={{ p: 3, textAlign: 'center' }}>
-              <Typography color="text.secondary">No one waiting</Typography>
-            </Card>
-          ) : (
-            waitingEntries.map((entry, index) => (
-              <WaitlistCard key={entry.id} entry={entry} position={index + 1} />
-            ))
-          )}
+          <Typography color="text.secondary" variant="body2" sx={{ mt: 1 }}>
+            Click &quot;Add to Waitlist&quot; to add your first entry.
+          </Typography>
+        </Card>
+      ) : (
+        <TableContainer component={Paper}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    checked={entries.length > 0 && selectedIds.size === entries.length}
+                    indeterminate={selectedIds.size > 0 && selectedIds.size < entries.length}
+                    onChange={toggleSelectAll}
+                    icon={<CheckBoxOutlineBlank />}
+                    checkedIcon={<CheckBoxIcon />}
+                  />
+                </TableCell>
+                <TableCell>#</TableCell>
+                <TableCell>Client</TableCell>
+                <TableCell>Phone</TableCell>
+                <TableCell>Party Size</TableCell>
+                <TableCell>Service</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Wait Time</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {entries.map((entry, index) => {
+                const isSelected = selectedIds.has(entry.id);
+                return (
+                  <TableRow
+                    key={entry.id}
+                    hover
+                    selected={isSelected}
+                    sx={{ cursor: 'pointer', '&:last-child td': { border: 0 } }}
+                    onClick={() => handleRowClick(entry)}
+                  >
+                    <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={isSelected}
+                        onChange={() => toggleSelect(entry.id)}
+                        icon={<CheckBoxOutlineBlank />}
+                        checkedIcon={<CheckBoxIcon />}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>
+                        {index + 1}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={500}>
+                        {entry.clientName}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{entry.clientPhone}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{entry.partySize}</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {getServiceName(entry.serviceId) || '--'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={STATUS_CONFIG[entry.status].label}
+                        color={STATUS_CONFIG[entry.status].color}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {formatDistanceToNow(new Date(entry.createdAt), { addSuffix: true })}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5 }}>
+                        {entry.status === 'WAITING' && (
+                          <>
+                            <Tooltip title="Notify client">
+                              <IconButton
+                                size="small"
+                                color="info"
+                                onClick={() => handleStatusChange(entry.id, 'NOTIFIED')}
+                              >
+                                <NotifyIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Seat client">
+                              <IconButton
+                                size="small"
+                                color="success"
+                                onClick={() => handleStatusChange(entry.id, 'SEATED')}
+                              >
+                                <SeatIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </>
+                        )}
+                        {entry.status === 'NOTIFIED' && (
+                          <Tooltip title="Seat client">
+                            <IconButton
+                              size="small"
+                              color="success"
+                              onClick={() => handleStatusChange(entry.id, 'SEATED')}
+                            >
+                              <SeatIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        <Tooltip title="Remove">
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleRemove(entry.id)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
-          {notifiedEntries.length > 0 && (
-            <>
-              <Divider sx={{ my: 3 }} />
-              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <NotifyIcon color="info" />
-                Notified ({notifiedEntries.length})
+      {/* Detail Drawer */}
+      <Drawer
+        anchor="right"
+        open={drawerOpen}
+        onClose={() => {
+          setDrawerOpen(false);
+          setSelectedEntry(null);
+        }}
+        PaperProps={{ sx: { width: { xs: '100%', sm: 420 } } }}
+      >
+        {selectedEntry && (
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* Drawer Header */}
+            <Box
+              sx={{
+                p: 2,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                borderBottom: 1,
+                borderColor: 'divider',
+              }}
+            >
+              <Typography variant="h6" fontWeight={600}>
+                Waitlist Details
               </Typography>
-              {notifiedEntries.map((entry) => (
-                <WaitlistCard key={entry.id} entry={entry} />
-              ))}
-            </>
-          )}
-        </Grid>
+              <IconButton
+                onClick={() => {
+                  setDrawerOpen(false);
+                  setSelectedEntry(null);
+                }}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Box>
 
-        {/* Recent Activity */}
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Typography variant="h6" gutterBottom>
-            Recent Activity
-          </Typography>
-          {completedEntries.length === 0 ? (
-            <Card sx={{ p: 3, textAlign: 'center' }}>
-              <Typography color="text.secondary">No activity yet today</Typography>
-            </Card>
-          ) : (
-            completedEntries.slice(0, 10).map((entry) => (
-              <WaitlistCard key={entry.id} entry={entry} />
-            ))
-          )}
-        </Grid>
-      </Grid>
+            {/* Drawer Body */}
+            <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
+              {/* Client Name and Status */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 3 }}>
+                <Box
+                  sx={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '50%',
+                    bgcolor: `${STATUS_CONFIG[selectedEntry.status].color}.main`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                  }}
+                >
+                  <PersonIcon />
+                </Box>
+                <Box>
+                  <Typography variant="h6" fontWeight={600}>
+                    {selectedEntry.clientName}
+                  </Typography>
+                  <Chip
+                    size="small"
+                    label={STATUS_CONFIG[selectedEntry.status].label}
+                    color={STATUS_CONFIG[selectedEntry.status].color}
+                  />
+                </Box>
+              </Box>
+
+              <Divider sx={{ mb: 3 }} />
+
+              {/* Details List */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <PhoneIcon sx={{ color: 'text.secondary' }} />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Phone
+                    </Typography>
+                    <Typography variant="body1">{selectedEntry.clientPhone}</Typography>
+                  </Box>
+                </Box>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <GroupIcon sx={{ color: 'text.secondary' }} />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Party Size
+                    </Typography>
+                    <Typography variant="body1">{selectedEntry.partySize}</Typography>
+                  </Box>
+                </Box>
+
+                {selectedEntry.serviceId && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <CalendarIcon sx={{ color: 'text.secondary' }} />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Service
+                      </Typography>
+                      <Typography variant="body1">
+                        {getServiceName(selectedEntry.serviceId) || 'Unknown'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+
+                {selectedEntry.preferredTech && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <PersonIcon sx={{ color: 'text.secondary' }} />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Preferred Technician
+                      </Typography>
+                      <Typography variant="body1">
+                        {getTechName(selectedEntry.preferredTech) || 'Unknown'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <TimeIcon sx={{ color: 'text.secondary' }} />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Estimated Wait
+                    </Typography>
+                    <Typography variant="body1">
+                      {selectedEntry.estimatedWait != null
+                        ? `${selectedEntry.estimatedWait} min`
+                        : 'N/A'}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <CalendarIcon sx={{ color: 'text.secondary' }} />
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">
+                      Joined
+                    </Typography>
+                    <Typography variant="body1">
+                      {format(new Date(selectedEntry.createdAt), 'MMM d, yyyy h:mm a')}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      ({formatDistanceToNow(new Date(selectedEntry.createdAt), { addSuffix: true })})
+                    </Typography>
+                  </Box>
+                </Box>
+
+                {selectedEntry.notifiedAt && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <NotifyIcon sx={{ color: 'text.secondary' }} />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Notified At
+                      </Typography>
+                      <Typography variant="body1">
+                        {format(new Date(selectedEntry.notifiedAt), 'MMM d, yyyy h:mm a')}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+
+                {selectedEntry.seatedAt && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <SeatIcon sx={{ color: 'text.secondary' }} />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Seated At
+                      </Typography>
+                      <Typography variant="body1">
+                        {format(new Date(selectedEntry.seatedAt), 'MMM d, yyyy h:mm a')}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+
+                {selectedEntry.notes && (
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                    <NotesIcon sx={{ color: 'text.secondary', mt: 0.5 }} />
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Notes
+                      </Typography>
+                      <Typography variant="body1">{selectedEntry.notes}</Typography>
+                    </Box>
+                  </Box>
+                )}
+              </Box>
+            </Box>
+
+            {/* Drawer Actions */}
+            <Divider />
+            <Box sx={{ p: 2, display: 'flex', gap: 1.5 }}>
+              {selectedEntry.status === 'WAITING' && (
+                <>
+                  <Button
+                    variant="outlined"
+                    color="info"
+                    startIcon={<NotifyIcon />}
+                    fullWidth
+                    onClick={() => handleStatusChange(selectedEntry.id, 'NOTIFIED')}
+                  >
+                    Notify
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    startIcon={<SeatIcon />}
+                    fullWidth
+                    onClick={() => handleStatusChange(selectedEntry.id, 'SEATED')}
+                  >
+                    Seat
+                  </Button>
+                </>
+              )}
+              {selectedEntry.status === 'NOTIFIED' && (
+                <Button
+                  variant="contained"
+                  color="success"
+                  startIcon={<SeatIcon />}
+                  fullWidth
+                  onClick={() => handleStatusChange(selectedEntry.id, 'SEATED')}
+                >
+                  Seat
+                </Button>
+              )}
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                fullWidth
+                onClick={() => handleRemove(selectedEntry.id)}
+              >
+                Remove
+              </Button>
+            </Box>
+          </Box>
+        )}
+      </Drawer>
 
       {/* Add Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
@@ -457,6 +877,21 @@ export default function WaitlistPage() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title={confirmAction?.title || ''}
+        message={confirmAction?.message || ''}
+        variant={confirmAction?.variant || 'danger'}
+        confirmText={confirmAction?.confirmText || 'Confirm'}
+        loading={confirmLoading}
+        onConfirm={handleConfirm}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setConfirmAction(null);
+        }}
+      />
     </Box>
   );
 }

@@ -218,6 +218,10 @@ model User {
   preferredLanguage String            @default("en")
   level             TechnicianLevel?  // For pricing tiers
   imageUrl          String?           // Profile photo
+  emailVerified     Boolean           @default(false)
+  emailVerifyToken  String?
+  passwordResetToken String?
+  passwordResetExpires DateTime?
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 

@@ -6,6 +6,8 @@ import {
   Paper,
   Typography,
   Button,
+  TextField,
+  InputAdornment,
   Table,
   TableBody,
   TableCell,
@@ -19,12 +21,10 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  CircularProgress,
   Grid,
   Card,
   CardContent,
@@ -32,25 +32,74 @@ import {
   Tab,
   FormControlLabel,
   Switch,
+  Checkbox,
+  Drawer,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  Toolbar,
+  ButtonGroup,
 } from '@mui/material';
 import {
+  Search,
   Add,
   Edit,
+  Delete,
   Schedule,
   Person,
   CalendarMonth,
+  Close,
+  Download,
+  PictureAsPdf,
+  DeleteSweep,
+  Email,
+  Phone,
+  Badge,
+  ToggleOn,
+  Translate,
+  WorkspacePremium,
 } from '@mui/icons-material';
+import { useToast } from '@/components/ToastProvider';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { TableSkeleton, CardsSkeleton } from '@/components/LoadingSkeleton';
+
+const ROLES = {
+  OWNER: 'Owner',
+  MANAGER: 'Manager',
+  TECHNICIAN: 'Technician',
+  FRONTDESK: 'Front Desk',
+} as const;
+
+const LEVELS = {
+  JUNIOR: 'Junior',
+  SENIOR: 'Senior',
+  MASTER: 'Master',
+  SPECIALIST: 'Specialist',
+} as const;
+
+const LANGUAGES: Record<string, string> = {
+  en: 'English',
+  vi: 'Vietnamese',
+  es: 'Spanish',
+  zh: 'Chinese',
+  ko: 'Korean',
+};
+
+type StaffRole = keyof typeof ROLES;
+type StaffLevel = keyof typeof LEVELS;
 
 interface StaffMember {
   id: string;
   name: string;
   email: string;
   phone: string | null;
-  role: string;
+  role: StaffRole;
+  level: StaffLevel;
   active: boolean;
   preferredLanguage: string;
-  appointmentsToday: number;
-  appointmentsWeek: number;
+  appointmentsToday?: number;
+  appointmentsWeek?: number;
 }
 
 interface ScheduleEntry {
@@ -68,13 +117,22 @@ const roleColors: Record<string, 'primary' | 'secondary' | 'success' | 'warning'
   FRONTDESK: 'success',
 };
 
+const levelColors: Record<string, 'default' | 'primary' | 'secondary' | 'warning'> = {
+  JUNIOR: 'default',
+  SENIOR: 'primary',
+  MASTER: 'warning',
+  SPECIALIST: 'secondary',
+};
+
 const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function StaffPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedTab, setSelectedTab] = useState(0);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<StaffMember | null>(null);
   const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
@@ -83,10 +141,25 @@ export default function StaffPage() {
     name: '',
     email: '',
     phone: '',
-    role: 'TECHNICIAN',
+    role: 'TECHNICIAN' as StaffRole,
+    level: 'JUNIOR' as StaffLevel,
     preferredLanguage: 'en',
     active: true,
   });
+
+  // Detail drawer
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailStaff, setDetailStaff] = useState<StaffMember | null>(null);
+
+  // Bulk select
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Confirm dialog
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'delete' | 'bulkDelete'>('delete');
+  const [deleting, setDeleting] = useState(false);
+
+  const toast = useToast();
 
   useEffect(() => {
     fetchStaff();
@@ -100,19 +173,47 @@ export default function StaffPage() {
         setStaff(data.staff || []);
       }
     } catch (error) {
-      console.error('Failed to fetch staff:', error);
+      toast.showError('Failed to load staff');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOpenDialog = () => {
+  // Row click opens detail drawer
+  const handleRowClick = (member: StaffMember) => {
+    setDetailStaff(member);
+    setDetailOpen(true);
+  };
+
+  // Edit from drawer or directly
+  const handleEdit = (member?: StaffMember) => {
+    const s = member || detailStaff;
+    if (s) {
+      setSelectedStaff(s);
+      setFormData({
+        name: s.name,
+        email: s.email,
+        phone: s.phone || '',
+        role: s.role,
+        level: s.level || 'JUNIOR',
+        preferredLanguage: s.preferredLanguage || 'en',
+        active: s.active,
+      });
+      setEditMode(true);
+      setDialogOpen(true);
+      setDetailOpen(false);
+    }
+  };
+
+  const handleAddNew = () => {
     setSelectedStaff(null);
+    setEditMode(false);
     setFormData({
       name: '',
       email: '',
       phone: '',
       role: 'TECHNICIAN',
+      level: 'JUNIOR',
       preferredLanguage: 'en',
       active: true,
     });
@@ -122,34 +223,103 @@ export default function StaffPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const response = await fetch('/api/staff', {
-        method: 'POST',
+      const url = editMode && selectedStaff ? `/api/staff/${selectedStaff.id}` : '/api/staff';
+      const response = await fetch(url, {
+        method: editMode ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
-
       if (!response.ok) throw new Error('Failed to save');
-
       setDialogOpen(false);
+      toast.showSuccess(editMode ? 'Staff member updated successfully' : 'Staff member added successfully');
       fetchStaff();
     } catch (error) {
-      console.error('Failed to save staff:', error);
+      toast.showError('Failed to save staff member');
     } finally {
       setSaving(false);
     }
   };
 
-  // Mock data
-  const mockStaff: StaffMember[] = staff.length > 0 ? staff : [
-    { id: '1', name: 'Linda Nguyen', email: 'linda@elegantnails.com', phone: '(408) 555-0100', role: 'OWNER', active: true, preferredLanguage: 'vi', appointmentsToday: 0, appointmentsWeek: 0 },
-    { id: '2', name: 'Maria Garcia', email: 'maria@elegantnails.com', phone: '(408) 555-0101', role: 'MANAGER', active: true, preferredLanguage: 'es', appointmentsToday: 0, appointmentsWeek: 0 },
-    { id: '3', name: 'Kim Tran', email: 'kim@elegantnails.com', phone: '(408) 555-0102', role: 'TECHNICIAN', active: true, preferredLanguage: 'vi', appointmentsToday: 5, appointmentsWeek: 28 },
-    { id: '4', name: 'Jenny Le', email: 'jenny@elegantnails.com', phone: '(408) 555-0103', role: 'TECHNICIAN', active: true, preferredLanguage: 'vi', appointmentsToday: 4, appointmentsWeek: 25 },
-    { id: '5', name: 'David Chen', email: 'david@elegantnails.com', phone: '(408) 555-0104', role: 'TECHNICIAN', active: true, preferredLanguage: 'zh', appointmentsToday: 6, appointmentsWeek: 32 },
-    { id: '6', name: 'Sarah Kim', email: 'sarah@elegantnails.com', phone: '(408) 555-0105', role: 'TECHNICIAN', active: true, preferredLanguage: 'ko', appointmentsToday: 3, appointmentsWeek: 20 },
-    { id: '7', name: 'Emily Wilson', email: 'emily@elegantnails.com', phone: '(408) 555-0106', role: 'FRONTDESK', active: true, preferredLanguage: 'en', appointmentsToday: 0, appointmentsWeek: 0 },
-  ];
+  // Delete handlers
+  const handleDeleteClick = (member?: StaffMember) => {
+    const s = member || detailStaff;
+    if (s) {
+      setSelectedStaff(s);
+      setConfirmAction('delete');
+      setConfirmOpen(true);
+    }
+  };
 
+  const handleDelete = async () => {
+    if (!selectedStaff) return;
+    setDeleting(true);
+    try {
+      const response = await fetch(`/api/staff/${selectedStaff.id}`, { method: 'DELETE' });
+      if (response.ok) {
+        toast.showSuccess(`${selectedStaff.name} deleted`);
+        setConfirmOpen(false);
+        setDetailOpen(false);
+        fetchStaff();
+      } else {
+        toast.showError('Failed to delete staff member');
+      }
+    } catch (error) {
+      toast.showError('Failed to delete staff member');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Bulk operations
+  const handleSelectAll = () => {
+    if (selectedIds.size === filteredStaff.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredStaff.map(s => s.id)));
+    }
+  };
+
+  const handleSelectOne = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const handleBulkDeleteClick = () => {
+    setConfirmAction('bulkDelete');
+    setConfirmOpen(true);
+  };
+
+  const handleBulkDelete = async () => {
+    setDeleting(true);
+    try {
+      const response = await fetch('/api/bulk', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), type: 'staff' }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        toast.showSuccess(`Deleted ${data.deletedCount} staff members`);
+        setSelectedIds(new Set());
+        setConfirmOpen(false);
+        fetchStaff();
+      }
+    } catch (error) {
+      toast.showError('Bulk delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Export
+  const handleExport = (format: 'csv' | 'pdf') => {
+    window.open(`/api/export/${format}?type=staff`, '_blank');
+    toast.showInfo(`Exporting staff as ${format.toUpperCase()}...`);
+  };
+
+  // Mock schedule data for the schedule dialog / weekly view
   const mockSchedule: ScheduleEntry[] = [
     { id: '1', dayOfWeek: 1, startTime: '09:00', endTime: '19:00', isWorking: true },
     { id: '2', dayOfWeek: 2, startTime: '09:00', endTime: '19:00', isWorking: true },
@@ -160,7 +330,17 @@ export default function StaffPage() {
     { id: '7', dayOfWeek: 0, startTime: '10:00', endTime: '17:00', isWorking: false },
   ];
 
-  const technicians = mockStaff.filter(s => s.role === 'TECHNICIAN');
+  // Filtering
+  const filteredStaff = staff.filter(
+    (member) =>
+      (selectedTab === 0 || (selectedTab === 1 && member.role === 'TECHNICIAN')) &&
+      (member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        member.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (member.phone && member.phone.toLowerCase().includes(searchQuery.toLowerCase())))
+  );
+
+  const technicians = staff.filter(s => s.role === 'TECHNICIAN');
+  const activeStaff = staff.filter(s => s.active);
   const totalAppointmentsToday = technicians.reduce((sum, t) => sum + (t.appointmentsToday || 0), 0);
   const avgAppointmentsWeek = technicians.length > 0
     ? Math.round(technicians.reduce((sum, t) => sum + (t.appointmentsWeek || 0), 0) / technicians.length)
@@ -172,58 +352,75 @@ export default function StaffPage() {
         <Typography variant="h4" fontWeight={600}>
           Staff Management
         </Typography>
-        <Button variant="contained" startIcon={<Add />} onClick={handleOpenDialog}>
-          Add Staff
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <ButtonGroup variant="outlined" size="small">
+            <Button startIcon={<Download />} onClick={() => handleExport('csv')}>CSV</Button>
+            <Button startIcon={<PictureAsPdf />} onClick={() => handleExport('pdf')}>PDF</Button>
+          </ButtonGroup>
+          <Button variant="contained" startIcon={<Add />} onClick={handleAddNew}>
+            Add Staff
+          </Button>
+        </Box>
       </Box>
 
       {/* Stats Cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <Person color="primary" />
-                <Typography variant="body2" color="text.secondary">Total Staff</Typography>
-              </Box>
-              <Typography variant="h4">{mockStaff.length}</Typography>
-            </CardContent>
-          </Card>
+      {loading ? <CardsSkeleton count={4} /> : (
+        <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Person color="primary" />
+                  <Typography variant="body2" color="text.secondary">Total Staff</Typography>
+                </Box>
+                <Typography variant="h4">{staff.length}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Person color="success" />
+                  <Typography variant="body2" color="text.secondary">Active Staff</Typography>
+                </Box>
+                <Typography variant="h4">{activeStaff.length}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <CalendarMonth color="secondary" />
+                  <Typography variant="body2" color="text.secondary">Today&apos;s Appointments</Typography>
+                </Box>
+                <Typography variant="h4">{totalAppointmentsToday}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid size={{ xs: 6, md: 3 }}>
+            <Card>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Schedule color="info" />
+                  <Typography variant="body2" color="text.secondary">Avg Weekly/Tech</Typography>
+                </Box>
+                <Typography variant="h4">{avgAppointmentsWeek}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <Person color="success" />
-                <Typography variant="body2" color="text.secondary">Technicians</Typography>
-              </Box>
-              <Typography variant="h4">{technicians.length}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <CalendarMonth color="secondary" />
-                <Typography variant="body2" color="text.secondary">Today&apos;s Appointments</Typography>
-              </Box>
-              <Typography variant="h4">{totalAppointmentsToday}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                <Schedule color="info" />
-                <Typography variant="body2" color="text.secondary">Avg Weekly/Tech</Typography>
-              </Box>
-              <Typography variant="h4">{avgAppointmentsWeek}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      )}
+
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <Paper sx={{ p: 1.5, mb: 2, display: 'flex', alignItems: 'center', gap: 2, bgcolor: 'primary.50' }}>
+          <Typography variant="body2" fontWeight={600}>{selectedIds.size} selected</Typography>
+          <Button size="small" color="error" startIcon={<DeleteSweep />} onClick={handleBulkDeleteClick}>Delete Selected</Button>
+          <Button size="small" onClick={() => setSelectedIds(new Set())}>Clear Selection</Button>
+        </Paper>
+      )}
 
       <Paper sx={{ p: 2 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
@@ -234,75 +431,106 @@ export default function StaffPage() {
           </Tabs>
         </Box>
 
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
-            <CircularProgress />
+        {/* Search bar (shown for list tabs) */}
+        {selectedTab !== 2 && (
+          <Box sx={{ mb: 2 }}>
+            <TextField
+              placeholder="Search staff by name, email, or phone..."
+              size="small"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              sx={{ width: 350 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start"><Search /></InputAdornment>
+                ),
+              }}
+            />
           </Box>
-        ) : selectedTab === 2 ? (
+        )}
+
+        {loading ? <TableSkeleton rows={8} columns={7} /> : selectedTab === 2 ? (
           /* Weekly Schedule View */
-          <Box>
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Technician</TableCell>
-                    {dayNames.map((day) => (
-                      <TableCell key={day} align="center">{day.substring(0, 3)}</TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {technicians.map((tech) => (
-                    <TableRow key={tech.id}>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
-                            {tech.name.charAt(0)}
-                          </Avatar>
-                          <Typography variant="body2">{tech.name}</Typography>
-                        </Box>
-                      </TableCell>
-                      {dayNames.map((_, dayIndex) => {
-                        const scheduleEntry = mockSchedule.find(s => s.dayOfWeek === dayIndex);
-                        return (
-                          <TableCell key={dayIndex} align="center">
-                            {scheduleEntry?.isWorking ? (
-                              <Chip
-                                label={`${scheduleEntry.startTime}-${scheduleEntry.endTime}`}
-                                size="small"
-                                color="success"
-                                variant="outlined"
-                              />
-                            ) : (
-                              <Chip label="Off" size="small" variant="outlined" />
-                            )}
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Technician</TableCell>
+                  {dayNames.map((day) => (
+                    <TableCell key={day} align="center">{day.substring(0, 3)}</TableCell>
                   ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {technicians.map((tech) => (
+                  <TableRow key={tech.id}>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
+                          {tech.name.charAt(0)}
+                        </Avatar>
+                        <Typography variant="body2">{tech.name}</Typography>
+                      </Box>
+                    </TableCell>
+                    {dayNames.map((_, dayIndex) => {
+                      const scheduleEntry = mockSchedule.find(s => s.dayOfWeek === dayIndex);
+                      return (
+                        <TableCell key={dayIndex} align="center">
+                          {scheduleEntry?.isWorking ? (
+                            <Chip
+                              label={`${scheduleEntry.startTime}-${scheduleEntry.endTime}`}
+                              size="small"
+                              color="success"
+                              variant="outlined"
+                            />
+                          ) : (
+                            <Chip label="Off" size="small" variant="outlined" />
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         ) : (
           /* Staff List View */
           <TableContainer>
             <Table>
               <TableHead>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      indeterminate={selectedIds.size > 0 && selectedIds.size < filteredStaff.length}
+                      checked={filteredStaff.length > 0 && selectedIds.size === filteredStaff.length}
+                      onChange={handleSelectAll}
+                    />
+                  </TableCell>
                   <TableCell>Staff Member</TableCell>
                   <TableCell>Role</TableCell>
+                  <TableCell>Level</TableCell>
                   <TableCell>Contact</TableCell>
                   <TableCell>Today</TableCell>
                   <TableCell>This Week</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {(selectedTab === 1 ? technicians : mockStaff).map((member) => (
-                  <TableRow key={member.id} hover>
+                {filteredStaff.map((member) => (
+                  <TableRow
+                    key={member.id}
+                    hover
+                    sx={{ cursor: 'pointer' }}
+                    onClick={() => handleRowClick(member)}
+                    selected={selectedIds.has(member.id)}
+                  >
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selectedIds.has(member.id)}
+                        onClick={(e) => handleSelectOne(member.id, e)}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                         <Avatar sx={{ bgcolor: 'primary.main' }}>
@@ -320,9 +548,17 @@ export default function StaffPage() {
                     </TableCell>
                     <TableCell>
                       <Chip
-                        label={member.role}
+                        label={ROLES[member.role] || member.role}
                         size="small"
-                        color={roleColors[member.role]}
+                        color={roleColors[member.role] || 'default'}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={LEVELS[member.level] || member.level || '-'}
+                        size="small"
+                        variant="outlined"
+                        color={levelColors[member.level] || 'default'}
                       />
                     </TableCell>
                     <TableCell>
@@ -330,12 +566,12 @@ export default function StaffPage() {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" fontWeight={500}>
-                        {member.role === 'TECHNICIAN' ? member.appointmentsToday : '-'}
+                        {member.role === 'TECHNICIAN' ? (member.appointmentsToday ?? 0) : '-'}
                       </Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2">
-                        {member.role === 'TECHNICIAN' ? member.appointmentsWeek : '-'}
+                        {member.role === 'TECHNICIAN' ? (member.appointmentsWeek ?? 0) : '-'}
                       </Typography>
                     </TableCell>
                     <TableCell>
@@ -345,29 +581,6 @@ export default function StaffPage() {
                         color={member.active ? 'success' : 'default'}
                       />
                     </TableCell>
-                    <TableCell align="right">
-                      <IconButton
-                        size="small"
-                        onClick={() => {
-                          setSelectedStaff(member);
-                          setDialogOpen(true);
-                        }}
-                      >
-                        <Edit />
-                      </IconButton>
-                      {member.role === 'TECHNICIAN' && (
-                        <IconButton
-                          size="small"
-                          onClick={() => {
-                            setSelectedStaff(member);
-                            setSchedule(mockSchedule);
-                            setScheduleDialogOpen(true);
-                          }}
-                        >
-                          <Schedule />
-                        </IconButton>
-                      )}
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -376,9 +589,68 @@ export default function StaffPage() {
         )}
       </Paper>
 
+      {/* Detail Drawer */}
+      <Drawer anchor="right" open={detailOpen} onClose={() => setDetailOpen(false)}>
+        <Box sx={{ width: 400, p: 3 }}>
+          <Toolbar sx={{ justifyContent: 'space-between', px: 0, mb: 2 }}>
+            <Typography variant="h6" fontWeight={600}>Staff Details</Typography>
+            <IconButton onClick={() => setDetailOpen(false)}><Close /></IconButton>
+          </Toolbar>
+          {detailStaff && (
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                <Avatar sx={{ width: 56, height: 56, bgcolor: 'primary.main', fontSize: 24 }}>
+                  {detailStaff.name.charAt(0)}
+                </Avatar>
+                <Box>
+                  <Typography variant="h5" fontWeight={600}>{detailStaff.name}</Typography>
+                  <Chip
+                    label={ROLES[detailStaff.role] || detailStaff.role}
+                    size="small"
+                    color={roleColors[detailStaff.role] || 'default'}
+                  />
+                </Box>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+              <List dense>
+                <ListItem>
+                  <Email sx={{ mr: 2, color: 'text.secondary' }} />
+                  <ListItemText primary="Email" secondary={detailStaff.email} />
+                </ListItem>
+                <ListItem>
+                  <Phone sx={{ mr: 2, color: 'text.secondary' }} />
+                  <ListItemText primary="Phone" secondary={detailStaff.phone || 'Not provided'} />
+                </ListItem>
+                <ListItem>
+                  <Badge sx={{ mr: 2, color: 'text.secondary' }} />
+                  <ListItemText primary="Role" secondary={ROLES[detailStaff.role] || detailStaff.role} />
+                </ListItem>
+                <ListItem>
+                  <WorkspacePremium sx={{ mr: 2, color: 'text.secondary' }} />
+                  <ListItemText primary="Level" secondary={LEVELS[detailStaff.level] || detailStaff.level || 'Not set'} />
+                </ListItem>
+                <ListItem>
+                  <Translate sx={{ mr: 2, color: 'text.secondary' }} />
+                  <ListItemText primary="Preferred Language" secondary={LANGUAGES[detailStaff.preferredLanguage] || detailStaff.preferredLanguage} />
+                </ListItem>
+                <ListItem>
+                  <ToggleOn sx={{ mr: 2, color: 'text.secondary' }} />
+                  <ListItemText primary="Status" secondary={detailStaff.active ? 'Active' : 'Inactive'} />
+                </ListItem>
+              </List>
+              <Divider sx={{ my: 2 }} />
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button variant="contained" startIcon={<Edit />} onClick={() => handleEdit()} fullWidth>Edit</Button>
+                <Button variant="outlined" color="error" startIcon={<Delete />} onClick={() => handleDeleteClick()} fullWidth>Delete</Button>
+              </Box>
+            </>
+          )}
+        </Box>
+      </Drawer>
+
       {/* Add/Edit Staff Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{selectedStaff ? 'Edit Staff Member' : 'Add Staff Member'}</DialogTitle>
+        <DialogTitle>{editMode ? 'Edit Staff Member' : 'Add Staff Member'}</DialogTitle>
         <DialogContent>
           <Box sx={{ py: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
@@ -407,12 +679,25 @@ export default function StaffPage() {
               <Select
                 label="Role"
                 value={formData.role}
-                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as StaffRole })}
               >
                 <MenuItem value="OWNER">Owner</MenuItem>
                 <MenuItem value="MANAGER">Manager</MenuItem>
                 <MenuItem value="TECHNICIAN">Technician</MenuItem>
                 <MenuItem value="FRONTDESK">Front Desk</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>Level</InputLabel>
+              <Select
+                label="Level"
+                value={formData.level}
+                onChange={(e) => setFormData({ ...formData, level: e.target.value as StaffLevel })}
+              >
+                <MenuItem value="JUNIOR">Junior</MenuItem>
+                <MenuItem value="SENIOR">Senior</MenuItem>
+                <MenuItem value="MASTER">Master</MenuItem>
+                <MenuItem value="SPECIALIST">Specialist</MenuItem>
               </Select>
             </FormControl>
             <FormControl fullWidth>
@@ -447,7 +732,7 @@ export default function StaffPage() {
             onClick={handleSave}
             disabled={saving || !formData.name || !formData.email}
           >
-            {saving ? 'Saving...' : selectedStaff ? 'Save Changes' : 'Add Staff'}
+            {saving ? 'Saving...' : editMode ? 'Save Changes' : 'Add Staff'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -505,6 +790,20 @@ export default function StaffPage() {
           <Button variant="contained">Save Schedule</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title={confirmAction === 'bulkDelete' ? 'Delete Selected Staff' : 'Delete Staff Member'}
+        message={confirmAction === 'bulkDelete'
+          ? `Delete ${selectedIds.size} selected staff members? This action cannot be undone.`
+          : `Delete ${selectedStaff?.name}? This action cannot be undone.`}
+        confirmText="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmAction === 'bulkDelete' ? handleBulkDelete : handleDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </Box>
   );
 }
