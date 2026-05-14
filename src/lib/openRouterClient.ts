@@ -33,19 +33,20 @@ class OpenRouterClient {
   private baseUrl = 'https://openrouter.ai/api/v1';
 
   constructor() {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL;
-
-    if (!apiKey) {
-      throw new Error('OPENROUTER_API_KEY environment variable is not set');
-    }
-
-    this.apiKey = apiKey;
-    this.model = model || 'anthropic/claude-3.5-sonnet';
+    // Do NOT throw at construction — module import would break cold starts.
+    // Throw lazily inside generate() if missing.
+    this.apiKey = process.env.OPENROUTER_API_KEY || '';
+    // Standardized cross-project default model.
+    this.model =
+      process.env.OPENROUTER_MODEL || 'anthropic/claude-3-5-sonnet-20241022';
   }
 
   async generate(options: GenerateOptions): Promise<string> {
     const { systemPrompt, userPrompt, maxTokens = 1024, temperature = 0.7 } = options;
+
+    if (!this.apiKey) {
+      throw new Error('OPENROUTER_API_KEY environment variable is not set');
+    }
 
     const messages: OpenRouterMessage[] = [];
 

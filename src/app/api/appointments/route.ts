@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import prisma from '@/lib/prisma';
 import { authOptions } from '@/lib/auth';
 import { startOfWeek, endOfWeek, addMinutes } from 'date-fns';
+import { emitAppointmentEvent } from '@/lib/socket-emitter';
 
 export async function GET(request: NextRequest) {
   try {
@@ -100,25 +101,27 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json({
-      appointment: {
-        id: appointment.id,
-        clientId: appointment.clientId,
-        clientName: appointment.client.name,
-        clientPhone: appointment.client.phone,
-        clientLanguage: appointment.client.preferredLanguage,
-        technicianId: appointment.technicianId,
-        technicianName: appointment.technician.name,
-        serviceId: appointment.serviceId,
-        serviceName: appointment.service.name,
-        serviceDuration: appointment.service.durationMinutes,
-        startTime: appointment.startTime.toISOString(),
-        endTime: appointment.endTime.toISOString(),
-        status: appointment.status,
-        source: appointment.source,
-        notes: appointment.notes,
-      },
-    }, { status: 201 });
+    const appointmentPayload = {
+      id: appointment.id,
+      clientId: appointment.clientId,
+      clientName: appointment.client.name,
+      clientPhone: appointment.client.phone,
+      clientLanguage: appointment.client.preferredLanguage,
+      technicianId: appointment.technicianId,
+      technicianName: appointment.technician.name,
+      serviceId: appointment.serviceId,
+      serviceName: appointment.service.name,
+      serviceDuration: appointment.service.durationMinutes,
+      startTime: appointment.startTime.toISOString(),
+      endTime: appointment.endTime.toISOString(),
+      status: appointment.status,
+      source: appointment.source,
+      notes: appointment.notes,
+    };
+
+    emitAppointmentEvent(session.user.salonId, 'appointment:created', appointmentPayload);
+
+    return NextResponse.json({ appointment: appointmentPayload }, { status: 201 });
   } catch (error) {
     console.error('Appointment create error:', error);
     return NextResponse.json({ error: 'Failed to create appointment' }, { status: 500 });

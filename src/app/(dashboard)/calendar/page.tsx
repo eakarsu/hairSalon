@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
+import { useAppointmentSocket } from '@/hooks/useAppointmentSocket';
 import {
   Box,
   Paper,
@@ -89,6 +91,7 @@ const timeSlots = Array.from({ length: 20 }, (_, i) => {
 });
 
 export default function CalendarPage() {
+  const { data: session } = useSession();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'day' | 'week'>('week');
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -111,6 +114,35 @@ export default function CalendarPage() {
     date: format(new Date(), 'yyyy-MM-dd'),
     time: '10:00',
     notes: '',
+  });
+
+  // Real-time socket updates
+  const handleAppointmentCreated = useCallback((data: unknown) => {
+    const appt = data as Appointment;
+    setAppointments((prev) => {
+      if (prev.find((a) => a.id === appt.id)) return prev;
+      return [...prev, appt].sort(
+        (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+      );
+    });
+  }, []);
+
+  const handleAppointmentUpdated = useCallback((data: unknown) => {
+    const appt = data as Appointment;
+    setAppointments((prev) =>
+      prev.map((a) => (a.id === appt.id ? { ...a, ...appt } : a))
+    );
+  }, []);
+
+  const handleAppointmentCancelled = useCallback((data: unknown) => {
+    const { id } = data as { id: string };
+    setAppointments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  useAppointmentSocket(session?.user?.salonId, {
+    onCreated: handleAppointmentCreated,
+    onUpdated: handleAppointmentUpdated,
+    onCancelled: handleAppointmentCancelled,
   });
 
   useEffect(() => {

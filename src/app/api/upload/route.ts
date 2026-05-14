@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
+import { uploadToCloudinary } from '@/lib/cloudinary';
+
+// Disable Next.js body parsing so we can handle the FormData stream directly
+export const config = {
+  api: { bodyParser: false },
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +17,7 @@ export async function POST(request: NextRequest) {
     }
 
     const formData = await request.formData();
-    const file = formData.get('file') as File;
+    const file = formData.get('file') as File | null;
 
     if (!file) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
@@ -28,34 +32,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file size (max 5MB)
-    const maxSize = 5 * 1024 * 1024;
+    // Validate file size (max 10 MB — Cloudinary handles compression)
+    const maxSize = 10 * 1024 * 1024;
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: 'File too large. Maximum size is 5MB.' },
+        { error: 'File too large. Maximum size is 10 MB.' },
         { status: 400 }
       );
     }
 
-    // Create unique filename
-    const timestamp = Date.now();
-    const ext = file.name.split('.').pop();
-    const filename = `${session.user.salonId}-${timestamp}.${ext}`;
-
-    // Ensure upload directory exists
-    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'gallery');
-    await mkdir(uploadDir, { recursive: true });
-
-    // Write file to disk
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    const filepath = path.join(uploadDir, filename);
-    await writeFile(filepath, buffer);
 
-    // Return the URL path
-    const imageUrl = `/uploads/gallery/${filename}`;
+    // Upload to Cloudinary under a per-salon folder
+    const result = await uploadToCloudinary(
+      buffer,
+      `gallery/${session.user.salonId}`,
+      {
+        // Store original filename as a tag for searchability
+        tags: [`salon:${session.user.salonId}`],
+        // Auto-quality and format for bandwidth savings
+        quality: 'auto',
+        fetch_format: 'auto',
+      }
+    );
 
-    return NextResponse.json({ imageUrl });
+    return NextResponse.json({
+      imageUrl: result.secureUrl,
+      thumbnailUrl: result.thumbnailUrl,
+      publicId: result.publicId,
+      width: result.width,
+      height: result.height,
+      bytes: result.bytes,
+    });
   } catch (error) {
     console.error('Upload error:', error);
     return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });

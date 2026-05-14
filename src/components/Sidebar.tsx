@@ -43,6 +43,9 @@ import {
   CardMembership as MembershipIcon,
   EventBusy as TimeOffIcon,
   Share as ReferralIcon,
+  LocationOn as LocationIcon,
+  ManageSearch as AuditIcon,
+  AutoAwesome as AIExtrasIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 260;
@@ -69,6 +72,10 @@ const menuItems = [
   { text: 'Time Off', icon: <TimeOffIcon />, path: '/time-off' },
   { text: 'Campaigns', icon: <CampaignIcon />, path: '/campaigns' },
   { text: 'Tasks', icon: <TaskIcon />, path: '/tasks' },
+  { text: 'Locations', icon: <LocationIcon />, path: '/locations' },
+  { text: 'AI Audit', icon: <AuditIcon />, path: '/ai-audit' },
+  { text: 'AI Extras', icon: <AIExtrasIcon />, path: '/ai-extras' },
+  { text: 'AI Extras 2', icon: <AIExtrasIcon />, path: '/ai-extras-2' },
 ];
 
 const bottomMenuItems = [

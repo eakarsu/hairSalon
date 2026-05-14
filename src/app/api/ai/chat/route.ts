@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import openRouterClient from '@/lib/openRouterClient';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  aiRateLimiter,
+  identifyAIRequest,
+  persistAIResult,
+  DEFAULT_AI_MODEL,
+} from '@/lib/ai-helpers';
+import { getPagination, paginatedResponse } from '@/lib/security';
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,6 +16,18 @@ export async function POST(request: NextRequest) {
 
     if (!salonId || !message) {
       return NextResponse.json({ error: 'Salon ID and message are required' }, { status: 400 });
+    }
+
+    // AI rate limiter (20/hr per identity); identity prefers clientId, falls back to IP.
+    const identity = clientId
+      ? `client:${clientId}`
+      : identifyAIRequest(null, request);
+    const rl = aiRateLimiter(identity);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'AI rate limit exceeded', resetAt: rl.resetAt },
+        { status: 429 }
+      );
     }
 
     // Get salon info
@@ -77,16 +96,27 @@ Email: ${salon.email}
       },
     });
 
-    // Log to AI audit
-    await prisma.aIAuditLog.create({
-      data: {
-        salonId,
-        clientId: clientId || null,
-        contextType: 'CHAT',
-        inputSummary: message.substring(0, 200),
-        outputSummary: response.substring(0, 500),
-      },
+    // Log to AI audit AND ai_results pool (one helper writes both).
+    await persistAIResult({
+      salonId,
+      feature: 'chat',
+      input: message,
+      output: response,
+      model: DEFAULT_AI_MODEL,
     });
+
+    // Keep client-bound audit row (helper above writes a generic one).
+    if (clientId) {
+      await prisma.aIAuditLog.create({
+        data: {
+          salonId,
+          clientId,
+          contextType: 'CHAT',
+          inputSummary: message.substring(0, 200),
+          outputSummary: response.substring(0, 500),
+        },
+      });
+    }
 
     return NextResponse.json({
       response,
@@ -98,23 +128,33 @@ Email: ${salon.email}
   }
 }
 
-// Get chat history
+// Get chat history (paginated)
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const sessionId = searchParams.get('sessionId');
-  const salonId = searchParams.get('salonId');
+  const url = new URL(request.url);
+  const sessionId = url.searchParams.get('sessionId');
+  const salonId = url.searchParams.get('salonId');
 
   if (!sessionId || !salonId) {
     return NextResponse.json({ error: 'Session ID and Salon ID are required' }, { status: 400 });
   }
 
   try {
-    const messages = await prisma.chatMessage.findMany({
-      where: { sessionId, salonId },
-      orderBy: { createdAt: 'asc' },
-    });
+    const { page, pageSize, skip, take } = getPagination(url, { pageSize: 50 });
+    const where = { sessionId, salonId };
+    const [messages, total] = await Promise.all([
+      prisma.chatMessage.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
+        skip,
+        take,
+      }),
+      prisma.chatMessage.count({ where }),
+    ]);
 
-    return NextResponse.json({ messages });
+    return NextResponse.json({
+      messages,
+      ...paginatedResponse(messages, total, page, pageSize),
+    });
   } catch (error) {
     console.error('Get chat history error:', error);
     return NextResponse.json({ error: 'Failed to get chat history' }, { status: 500 });
