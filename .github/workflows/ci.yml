@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: salonflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d salonflow_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/salonflow_test?schema=public
+      NEXTAUTH_URL: http://127.0.0.1:3000
+      CORS_ORIGINS: http://127.0.0.1:3000
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - name: Generate ephemeral test secrets
+        run: |
+          echo "NEXTAUTH_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "CUSTOMER_ACCESS_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "FIELD_WEBHOOK_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+      - run: corepack enable
+      - run: yarn install --frozen-lockfile
+      - run: yarn audit --groups dependencies --level low
+      - run: yarn db:migrate
+      - run: yarn typecheck
+      - run: yarn lint
+      - run: yarn test
+      - run: yarn build
+      - name: Prove migration and schema have no drift
+        run: |
+          createdb -h 127.0.0.1 -U postgres salonflow_shadow
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url postgresql://postgres:postgres@127.0.0.1:5432/salonflow_shadow?schema=public \
+            --exit-code
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2

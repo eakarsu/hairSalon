@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { addMinutes, parseISO, format, setHours, setMinutes, isBefore, isAfter } from 'date-fns';
+import { getAvailability } from '@/lib/field-service/workflow';
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,8 +16,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Get service duration
-    const service = await prisma.service.findUnique({
-      where: { id: serviceId },
+    const service = await prisma.service.findFirst({
+      where: { id: serviceId, salonId, active: true },
       select: { durationMinutes: true },
     });
 
@@ -25,6 +26,11 @@ export async function GET(request: NextRequest) {
     }
 
     const selectedDate = parseISO(date);
+    if (Number.isNaN(selectedDate.getTime())) return NextResponse.json({ error: 'Invalid date' }, { status: 400 });
+    const settings = await prisma.bookingSettings.findUnique({ where: { salonId } });
+    const earliest = new Date(Date.now() + (settings?.minAdvanceHours ?? 2) * 60 * 60 * 1000);
+    const latest = new Date(Date.now() + (settings?.maxAdvanceDays ?? 30) * 24 * 60 * 60 * 1000);
+    if (selectedDate > latest) return NextResponse.json({ slots: [] });
     const dayOfWeek = selectedDate.getDay();
 
     // Get available technicians for the day
@@ -32,6 +38,7 @@ export async function GET(request: NextRequest) {
       salonId,
       dayOfWeek,
       isWorking: true,
+      technician: { salonId, active: true, role: 'TECHNICIAN' },
     };
 
     if (technicianId) {
@@ -85,7 +92,7 @@ export async function GET(request: NextRequest) {
       while (isBefore(addMinutes(slotStart, service.durationMinutes), scheduleEnd) ||
              format(addMinutes(slotStart, service.durationMinutes), 'HH:mm') === format(scheduleEnd, 'HH:mm')) {
         // Skip past times
-        if (isBefore(slotStart, now)) {
+        if (isBefore(slotStart, now) || isBefore(slotStart, earliest)) {
           slotStart = addMinutes(slotStart, 30);
           continue;
         }
@@ -105,11 +112,16 @@ export async function GET(request: NextRequest) {
         });
 
         if (!hasConflict) {
-          slots.push({
-            time: format(slotStart, 'HH:mm'),
-            technicianId: schedule.technicianId,
-            technicianName: schedule.technician.name,
-          });
+          try {
+            await getAvailability({ salonId, serviceId, technicianId: schedule.technicianId, startTime: slotStart, endTime: slotEnd });
+            slots.push({
+              time: format(slotStart, 'HH:mm'),
+              technicianId: schedule.technicianId,
+              technicianName: schedule.technician.name,
+            });
+          } catch {
+            // Skill, time-off, schedule, or resource constraint makes this slot unavailable.
+          }
         }
 
         slotStart = addMinutes(slotStart, 30);

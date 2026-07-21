@@ -45,7 +45,6 @@ import {
   CardGiftcard,
   TrendingUp,
   Send,
-  AutoAwesome,
   EmojiEvents,
   Add as AddIcon,
   Remove,
@@ -454,26 +453,11 @@ export default function LoyaltyPage() {
 
     setGeneratingMessage(true);
     try {
-      const response = await fetch('/api/ai/loyalty-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientName: selectedAccount.clientName,
-          pointsBalance: selectedAccount.pointsBalance,
-          tier: selectedAccount.tier,
-          offers: ['10% off next visit', 'Free nail art with pedicure'],
-          language: selectedAccount.clientLanguage,
-          clientId: selectedAccount.clientId,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setGeneratedMessage(data.message);
-        showSuccess('Message generated successfully');
-      } else {
-        showError('Failed to generate message');
-      }
+      const reward = selectedAccount.pointsBalance >= 500
+        ? 'You have enough points to redeem a reward on your next visit.'
+        : `You are ${500 - selectedAccount.pointsBalance} points away from your next reward.`;
+      setGeneratedMessage(`Hi ${selectedAccount.clientName}, your ${selectedAccount.tier.toLowerCase()} loyalty balance is ${selectedAccount.pointsBalance.toLocaleString()} points. ${reward} Contact us when you are ready to book.`);
+      showSuccess('Message prepared');
     } catch (error) {
       console.error('Failed to generate message:', error);
       showError('Failed to generate message');
@@ -1203,7 +1187,7 @@ export default function LoyaltyPage() {
         </DialogActions>
       </Dialog>
 
-      {/* ==================== AI MESSAGE DIALOG ==================== */}
+      {/* ==================== LOYALTY MESSAGE DIALOG ==================== */}
       <Dialog open={messageDialogOpen} onClose={() => setMessageDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
           Send Loyalty Message - {selectedAccount?.clientName}
@@ -1211,12 +1195,12 @@ export default function LoyaltyPage() {
         <DialogContent>
           <Box sx={{ py: 2 }}>
             <Typography variant="body2" color="text.secondary" gutterBottom>
-              Generate a personalized loyalty message in the client&apos;s preferred language
+              Prepare a factual loyalty balance message for this client
               ({selectedAccount?.clientLanguage?.toUpperCase() || 'EN'})
             </Typography>
             <Button
               variant="outlined"
-              startIcon={generatingMessage ? <CircularProgress size={16} /> : <AutoAwesome />}
+              startIcon={generatingMessage ? <CircularProgress size={16} /> : <Send />}
               onClick={handleGenerateMessage}
               disabled={generatingMessage}
               sx={{ mt: 2, mb: 2 }}

@@ -30,6 +30,10 @@ export const authOptions: NextAuthOptions = {
           throw new Error('Account is deactivated');
         }
 
+        if (!user.emailVerified) {
+          throw new Error('Email verification is required');
+        }
+
         const isPasswordValid = await compare(credentials.password, user.hashedPassword);
 
         if (!isPasswordValid) {

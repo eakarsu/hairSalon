@@ -180,7 +180,7 @@ export default function LoginPage() {
                 WebkitTextFillColor: 'transparent',
               }}
             >
-              NailFlow AI
+              SalonFlow
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               Sign in to your salon management dashboard
@@ -191,23 +191,6 @@ export default function LoginPage() {
             <LoginFormContent />
           </Suspense>
 
-          <Box sx={{ mt: 4, p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
-            <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-              Demo Credentials:
-            </Typography>
-            <Typography variant="caption" display="block">
-              <strong>Owner:</strong> linda@elegantnails.com
-            </Typography>
-            <Typography variant="caption" display="block">
-              <strong>Manager:</strong> maria@elegantnails.com
-            </Typography>
-            <Typography variant="caption" display="block">
-              <strong>Technician:</strong> kim@elegantnails.com
-            </Typography>
-            <Typography variant="caption" display="block" sx={{ mt: 1, fontWeight: 'bold' }}>
-              Password for all: password123
-            </Typography>
-          </Box>
         </CardContent>
       </Card>
     </Box>

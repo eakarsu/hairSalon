@@ -30,7 +30,7 @@ export function TableSkeleton({ rows = 5, columns = 6 }: { rows?: number; column
                       <Skeleton variant="text" width={120} />
                     </Box>
                   ) : (
-                    <Skeleton variant="text" width={60 + Math.random() * 60} />
+                    <Skeleton variant="text" width={70 + ((rowIdx + colIdx) % 4) * 12} />
                   )}
                 </TableCell>
               ))}

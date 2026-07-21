@@ -4,6 +4,16 @@ import next from 'next';
 import { Server as SocketIOServer } from 'socket.io';
 import jwt from 'jsonwebtoken';
 
+type SocketIdentity =
+  | { kind: 'service' }
+  | { kind: 'user'; userId: string; salonId: string };
+
+function requiredSecret(name: string, minimumLength = 32): string {
+  const value = process.env[name];
+  if (!value || value.length < minimumLength) throw new Error(`${name} must contain at least ${minimumLength} characters`);
+  return value;
+}
+
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST || 'localhost';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -11,14 +21,13 @@ const port = parseInt(process.env.PORT || '3000', 10);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
-const ALLOWED_ORIGINS = (
-  process.env.CORS_ORIGINS ||
-  process.env.NEXTAUTH_URL ||
-  `http://${hostname}:${port}`
-)
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || process.env.NEXTAUTH_URL || (dev ? `http://${hostname}:${port}` : ''))
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+
+const socketSecret = requiredSecret('NEXTAUTH_SECRET');
+if (!dev && ALLOWED_ORIGINS.length === 0) throw new Error('CORS_ORIGINS or NEXTAUTH_URL is required in production');
 
 app.prepare().then(() => {
   const httpServer = createServer(async (req, res) => {
@@ -35,9 +44,7 @@ app.prepare().then(() => {
   const io = new SocketIOServer(httpServer, {
     cors: {
       origin:
-        ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.length === 0
-          ? '*'
-          : ALLOWED_ORIGINS,
+        ALLOWED_ORIGINS,
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -48,9 +55,9 @@ app.prepare().then(() => {
   if (process.env.REDIS_URL) {
     (async () => {
       try {
-        // @ts-ignore - optional dep
+        // @ts-expect-error - optional dependency enabled only in scaled deployments
         const { createAdapter } = await import('@socket.io/redis-adapter');
-        // @ts-ignore - optional dep
+        // @ts-expect-error - optional dependency enabled only in scaled deployments
         const { createClient } = await import('redis');
         const pubClient = createClient({ url: process.env.REDIS_URL });
         const subClient = pubClient.duplicate();
@@ -71,30 +78,31 @@ app.prepare().then(() => {
   // for trusted internal clients. Fall back to read-only if no auth (kiosks may use this).
   io.use((socket, next) => {
     try {
-      const token =
+      const suppliedToken =
         socket.handshake.auth?.token ||
         socket.handshake.query?.token ||
         socket.handshake.headers['x-auth-token'];
+      const token = Array.isArray(suppliedToken) ? suppliedToken[0] : suppliedToken;
 
       const sharedToken = process.env.SOCKET_AUTH_TOKEN;
-      const secret = process.env.NEXTAUTH_SECRET || 'your-secret-key';
 
       if (!token) {
-        // Mark unauthenticated; only public read events allowed.
-        (socket.data as any).auth = { kind: 'guest' };
-        return next();
+        return next(new Error('UNAUTHORIZED'));
       }
 
       if (sharedToken && token === sharedToken) {
-        (socket.data as any).auth = { kind: 'service' };
+        (socket.data as { auth?: SocketIdentity }).auth = { kind: 'service' };
         return next();
       }
 
       try {
-        const decoded: any = jwt.verify(token as string, secret);
-        (socket.data as any).auth = {
+        const decoded = jwt.verify(String(token), socketSecret, { algorithms: ['HS256'], audience: 'salonflow-socket' });
+        if (typeof decoded === 'string' || typeof decoded.salonId !== 'string') return next(new Error('UNAUTHORIZED'));
+        const userId = typeof decoded.userId === 'string' ? decoded.userId : decoded.sub;
+        if (!userId) return next(new Error('UNAUTHORIZED'));
+        (socket.data as { auth?: SocketIdentity }).auth = {
           kind: 'user',
-          userId: decoded.userId || decoded.sub,
+          userId,
           salonId: decoded.salonId,
         };
         return next();
@@ -111,15 +119,14 @@ app.prepare().then(() => {
 
   io.on('connection', (socket) => {
     const salonId = socket.handshake.query.salonId as string;
-    const auth = (socket.data as any).auth;
+    const auth = (socket.data as { auth?: SocketIdentity }).auth;
 
     // Authorize room join: user must be tied to that salonId; service tokens may join any.
     if (salonId) {
       const allowed =
         auth?.kind === 'service' ||
         (auth?.kind === 'user' && auth.salonId === salonId) ||
-        // Guests get a public read-only room
-        (auth?.kind === 'guest' && socket.handshake.query.public === 'true');
+        false;
       if (allowed) {
         socket.join(`salon:${salonId}`);
       } else {

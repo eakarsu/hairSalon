@@ -18,11 +18,18 @@ enum UserRole {
 }
 
 enum AppointmentStatus {
+  QUOTED
+  RESERVED
   BOOKED
   CONFIRMED
+  DISPATCHED
+  EN_ROUTE
+  IN_PROGRESS
+  PARTIALLY_COMPLETED
   COMPLETED
   NO_SHOW
   CANCELLED
+  EXCEPTION
 }
 
 enum AppointmentSource {
@@ -99,9 +106,65 @@ enum AIContextType {
 
 enum PaymentStatus {
   PENDING
+  AUTHORIZED
   COMPLETED
   FAILED
+  PARTIALLY_REFUNDED
   REFUNDED
+}
+
+enum QuoteStatus {
+  DRAFT
+  OFFERED
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+enum ChangeOrderStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
+  APPLIED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+enum ProviderOperation {
+  MAP_ROUTE
+  CALENDAR_RESERVE
+  CALENDAR_RELEASE
+  MESSAGE
+  TAX_QUOTE
+  PAYMENT_AUTHORIZE
+  PAYMENT_CAPTURE
+  PAYMENT_REFUND
+  ACCOUNTING_INVOICE
+  ACCOUNTING_PAYMENT
+}
+
+enum ProviderEventDirection {
+  OUTBOUND
+  INBOUND_WEBHOOK
+}
+
+enum InventoryReservationStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+}
+
+enum OfflineCommandStatus {
+  PENDING
+  APPLIED
+  CONFLICT
+  FAILED
 }
 
 enum PaymentMethod {
@@ -167,42 +230,50 @@ model Salon {
   updatedAt       DateTime @updatedAt
 
   // Relations
-  locations                Location[]
-  users                    User[]
-  services                 Service[]
-  clients                  Client[]
-  appointments             Appointment[]
-  loyaltyAccounts          LoyaltyAccount[]
-  staffSchedules           StaffSchedule[]
-  campaigns                Campaign[]
-  tasks                    Task[]
-  aiAuditLogs              AIAuditLog[]
-  inventoryItems           InventoryItem[]
-  giftCards                GiftCard[]
-  waitlistEntries          Waitlist[]
-  payments                 Payment[]
-  tips                     Tip[]
-  galleryPhotos            GalleryPhoto[]
-  serviceAddons            ServiceAddon[]
-  recurringAppointments    RecurringAppointment[]
-  chatMessages             ChatMessage[]
-  reviews                  Review[]
-  noShowPredictions        NoShowPrediction[]
+  locations                 Location[]
+  users                     User[]
+  services                  Service[]
+  clients                   Client[]
+  appointments              Appointment[]
+  loyaltyAccounts           LoyaltyAccount[]
+  staffSchedules            StaffSchedule[]
+  campaigns                 Campaign[]
+  tasks                     Task[]
+  aiAuditLogs               AIAuditLog[]
+  inventoryItems            InventoryItem[]
+  giftCards                 GiftCard[]
+  waitlistEntries           Waitlist[]
+  payments                  Payment[]
+  tips                      Tip[]
+  galleryPhotos             GalleryPhoto[]
+  serviceAddons             ServiceAddon[]
+  recurringAppointments     RecurringAppointment[]
+  chatMessages              ChatMessage[]
+  reviews                   Review[]
+  noShowPredictions         NoShowPrediction[]
   // New feature relations
-  servicePricings          ServicePricing[]
-  commissions              Commission[]
-  commissionRules          CommissionRule[]
-  retailProducts           RetailProduct[]
-  retailSales              RetailSale[]
-  servicePackages          ServicePackage[]
-  packageSales             PackageSale[]
-  membershipPlans          MembershipPlan[]
-  memberships              Membership[]
-  timeOffRequests          TimeOffRequest[]
-  technicianSkills         TechnicianSkill[]
-  stations                 Station[]
-  clientFamilies           ClientFamily[]
-  referrals                Referral[]
+  servicePricings           ServicePricing[]
+  commissions               Commission[]
+  commissionRules           CommissionRule[]
+  retailProducts            RetailProduct[]
+  retailSales               RetailSale[]
+  servicePackages           ServicePackage[]
+  packageSales              PackageSale[]
+  membershipPlans           MembershipPlan[]
+  memberships               Membership[]
+  timeOffRequests           TimeOffRequest[]
+  technicianSkills          TechnicianSkill[]
+  stations                  Station[]
+  clientFamilies            ClientFamily[]
+  referrals                 Referral[]
+  quotes                    ServiceQuote[]
+  serviceAreas              ServiceArea[]
+  invoices                  Invoice[]
+  providerEvents            FieldProviderEvent[]
+  appointmentEvents         AppointmentEvent[]
+  offlineCommands           OfflineCommand[]
+  kioskDevices              KioskDevice[]
+  appointmentCommunications AppointmentCommunication[]
 
   @@index([email])
 }
@@ -214,6 +285,8 @@ model Location {
   address   String
   phone     String
   timezone  String   @default("America/New_York")
+  latitude  Float?
+  longitude Float?
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -228,24 +301,24 @@ model Location {
 }
 
 model User {
-  id                String            @id @default(cuid())
-  salonId           String
-  locationId        String?           // null = not assigned to a specific location
-  name              String
-  email             String            @unique
-  hashedPassword    String
-  role              UserRole
-  phone             String?
-  active            Boolean           @default(true)
-  preferredLanguage String            @default("en")
-  level             TechnicianLevel?  // For pricing tiers
-  imageUrl          String?           // Profile photo
-  emailVerified     Boolean           @default(false)
-  emailVerifyToken  String?
-  passwordResetToken String?
+  id                   String           @id @default(cuid())
+  salonId              String
+  locationId           String? // null = not assigned to a specific location
+  name                 String
+  email                String           @unique
+  hashedPassword       String
+  role                 UserRole
+  phone                String?
+  active               Boolean          @default(true)
+  preferredLanguage    String           @default("en")
+  level                TechnicianLevel? // For pricing tiers
+  imageUrl             String? // Profile photo
+  emailVerified        Boolean          @default(false)
+  emailVerifyToken     String?
+  passwordResetToken   String?
   passwordResetExpires DateTime?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
   // Relations
   salon                 Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
@@ -266,6 +339,8 @@ model User {
   approvedTimeOff       TimeOffRequest[]       @relation("ApprovedTimeOff")
   skills                TechnicianSkill[]      @relation("TechnicianSkills")
   stationAssignments    StationAssignment[]    @relation("StationAssignments")
+  appointmentEvents     AppointmentEvent[]     @relation("AppointmentEventActor")
+  serviceQuotes         ServiceQuote[]         @relation("QuoteTechnician")
 
   @@index([salonId])
   @@index([email])
@@ -275,27 +350,30 @@ model User {
 model Service {
   id              String          @id @default(cuid())
   salonId         String
-  locationId      String?         // null = available at all locations
+  locationId      String? // null = available at all locations
   name            String
   description     String?
   category        ServiceCategory @default(OTHER)
   durationMinutes Int
   basePrice       Float
   active          Boolean         @default(true)
-  imageUrl        String?         // Service image
+  imageUrl        String? // Service image
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
   // Relations
-  salon                 Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  location              Location?              @relation("ServiceLocation", fields: [locationId], references: [id], onDelete: SetNull)
+  salon                 Salon                         @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  location              Location?                     @relation("ServiceLocation", fields: [locationId], references: [id], onDelete: SetNull)
   appointments          Appointment[]
   addons                ServiceAddon[]
   recurringAppointments RecurringAppointment[]
   // New feature relations
   pricingTiers          ServicePricing[]
-  appointmentServices   AppointmentService[]   @relation("AppointmentServices")
+  appointmentServices   AppointmentService[]          @relation("AppointmentServices")
   packageServices       PackageService[]
+  inventoryRequirements ServiceInventoryRequirement[]
+  skillRequirements     ServiceSkillRequirement[]
+  quotes                ServiceQuote[]
 
   @@index([salonId])
   @@index([active])
@@ -303,22 +381,22 @@ model Service {
 }
 
 model Client {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   salonId           String
   name              String
   phone             String
   email             String?
   preferredTechId   String?
-  preferredLanguage String   @default("en")
-  marketingOptIn    Boolean  @default(true)
+  preferredLanguage String    @default("en")
+  marketingOptIn    Boolean   @default(true)
   birthday          DateTime?
   notes             String?
   // New fields for missing features
-  allergies         String?  // Allergies/sensitivities
-  referralSource    String?  // How they found us
-  familyId          String?  // Link to family/household
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  allergies         String? // Allergies/sensitivities
+  referralSource    String? // How they found us
+  familyId          String? // Link to family/household
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   // Relations
   salon                 Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
@@ -341,6 +419,8 @@ model Client {
   memberships           Membership[]
   referralsGiven        Referral[]             @relation("ReferredBy")
   referredBy            Referral?              @relation("ReferredClients")
+  quotes                ServiceQuote[]
+  invoices              Invoice[]
 
   @@index([salonId])
   @@index([phone])
@@ -350,36 +430,70 @@ model Client {
 }
 
 model Appointment {
-  id           String            @id @default(cuid())
-  salonId      String
-  locationId   String?           // null = unassigned location
-  clientId     String
-  technicianId String
-  serviceId    String
-  startTime    DateTime
-  endTime      DateTime
-  status       AppointmentStatus @default(BOOKED)
-  source       AppointmentSource @default(ONLINE)
-  notes        String?
-  depositPaid  Boolean           @default(false)
-  depositAmount Float?
-  groupId      String?           // For group appointments
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  id                      String            @id @default(cuid())
+  appointmentNumber       String            @unique
+  salonId                 String
+  locationId              String? // null = unassigned location
+  clientId                String
+  technicianId            String
+  serviceId               String
+  startTime               DateTime
+  endTime                 DateTime
+  status                  AppointmentStatus @default(BOOKED)
+  source                  AppointmentSource @default(ONLINE)
+  notes                   String?
+  depositPaid             Boolean           @default(false)
+  depositAmount           Float?
+  groupId                 String? // For group appointments
+  quoteId                 String?           @unique
+  idempotencyKey          String            @unique
+  requestDigest           String
+  customerAccessTokenHash String?
+  version                 Int               @default(1)
+  currency                String            @default("USD")
+  serviceCents            Int
+  travelCents             Int               @default(0)
+  taxCents                Int               @default(0)
+  changeOrderCents        Int               @default(0)
+  totalCents              Int
+  serviceAddress          String?
+  serviceLatitude         Float?
+  serviceLongitude        Float?
+  travelDistanceMeters    Int?
+  dispatchedAt            DateTime?
+  enRouteAt               DateTime?
+  workStartedAt           DateTime?
+  completedAt             DateTime?
+  cancelledAt             DateTime?
+  cancellationReason      String?
+  exceptionCode           String?
+  exceptionReason         String?
+  lastSyncedAt            DateTime?
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
 
   // Relations
-  salon            Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  location         Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  client           Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  technician       User              @relation("TechnicianAppointments", fields: [technicianId], references: [id], onDelete: Cascade)
-  service          Service           @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  visit            Visit?
-  payment          Payment?
-  tip              Tip?
-  review           Review?
-  noShowPrediction NoShowPrediction?
+  salon                 Salon                      @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  location              Location?                  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  client                Client                     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  technician            User                       @relation("TechnicianAppointments", fields: [technicianId], references: [id], onDelete: Cascade)
+  service               Service                    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  visit                 Visit?
+  payment               Payment?
+  tip                   Tip?
+  review                Review?
+  noShowPrediction      NoShowPrediction?
   // New feature relations
-  services         AppointmentService[] // Multi-service booking
+  services              AppointmentService[] // Multi-service booking
+  quote                 ServiceQuote?              @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  changeOrders          ChangeOrder[]
+  progressEntries       JobProgress[]
+  invoice               Invoice?
+  events                AppointmentEvent[]
+  providerEvents        FieldProviderEvent[]
+  inventoryReservations InventoryReservation[]
+  offlineCommands       OfflineCommand[]
+  communications        AppointmentCommunication[]
 
   @@index([salonId])
   @@index([clientId])
@@ -388,6 +502,7 @@ model Appointment {
   @@index([startTime])
   @@index([status])
   @@index([groupId])
+  @@index([salonId, technicianId, startTime, endTime])
 }
 
 model Visit {
@@ -451,9 +566,9 @@ model StaffSchedule {
   id           String   @id @default(cuid())
   salonId      String
   technicianId String
-  dayOfWeek    Int      // 0 = Sunday, 6 = Saturday
-  startTime    String   // e.g., "09:00"
-  endTime      String   // e.g., "17:00"
+  dayOfWeek    Int // 0 = Sunday, 6 = Saturday
+  startTime    String // e.g., "09:00"
+  endTime      String // e.g., "17:00"
   isWorking    Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -474,8 +589,8 @@ model Campaign {
   type          CampaignType
   audienceQuery Json?
   status        CampaignStatus @default(ACTIVE)
-  scheduledAt   DateTime?      // When to send this campaign
-  sentAt        DateTime?      // When it was actually sent
+  scheduledAt   DateTime? // When to send this campaign
+  sentAt        DateTime? // When it was actually sent
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -491,14 +606,14 @@ model Campaign {
 }
 
 model CampaignMessage {
-  id          String        @id @default(cuid())
+  id          String         @id @default(cuid())
   campaignId  String
   clientId    String
   channel     MessageChannel
-  language    String        @default("en")
+  language    String         @default("en")
   scheduledAt DateTime
   sentAt      DateTime?
-  status      MessageStatus @default(PENDING)
+  status      MessageStatus  @default(PENDING)
   body        String
 
   // Relations
@@ -556,23 +671,25 @@ model AIAuditLog {
 // ============ NEW FEATURE MODELS ============
 
 model InventoryItem {
-  id           String            @id @default(cuid())
-  salonId      String
-  name         String
-  sku          String?
-  category     InventoryCategory
-  quantity     Int               @default(0)
-  minQuantity  Int               @default(5)
-  costPrice    Float?
-  retailPrice  Float?
-  supplier     String?
-  active       Boolean           @default(true)
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  id          String            @id @default(cuid())
+  salonId     String
+  name        String
+  sku         String?
+  category    InventoryCategory
+  quantity    Int               @default(0)
+  minQuantity Int               @default(5)
+  costPrice   Float?
+  retailPrice Float?
+  supplier    String?
+  active      Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
 
   // Relations
-  salon        Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  transactions InventoryTransaction[]
+  salon               Salon                         @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  transactions        InventoryTransaction[]
+  serviceRequirements ServiceInventoryRequirement[]
+  reservations        InventoryReservation[]
 
   @@unique([salonId, sku])
   @@index([salonId])
@@ -609,8 +726,8 @@ model GiftCard {
   updatedAt    DateTime       @updatedAt
 
   // Relations
-  salon     Salon    @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  recipient Client?  @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+  salon     Salon     @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  recipient Client?   @relation(fields: [recipientId], references: [id], onDelete: SetNull)
   payments  Payment[]
 
   @@index([salonId])
@@ -646,26 +763,34 @@ model Waitlist {
 }
 
 model Payment {
-  id            String        @id @default(cuid())
-  salonId       String
-  appointmentId String?       @unique
-  clientId      String
-  amount        Float
-  method        PaymentMethod
-  status        PaymentStatus @default(PENDING)
-  giftCardId    String?
-  stripeId      String?
-  notes         String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id                String        @id @default(cuid())
+  salonId           String
+  appointmentId     String?       @unique
+  clientId          String
+  amount            Float
+  amountCents       Int
+  capturedCents     Int           @default(0)
+  refundedCents     Int           @default(0)
+  currency          String        @default("USD")
+  method            PaymentMethod
+  status            PaymentStatus @default(PENDING)
+  giftCardId        String?
+  stripeId          String?
+  provider          String?
+  providerPaymentId String?       @unique
+  idempotencyKey    String?       @unique
+  notes             String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   // Relations
-  salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
-  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
-  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  giftCard    GiftCard?    @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
+  salon       Salon           @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  appointment Appointment?    @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  client      Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  giftCard    GiftCard?       @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
   // New feature relations
   splits      PaymentSplit[] // For split payments
+  refunds     PaymentRefund[]
 
   @@index([salonId])
   @@index([appointmentId])
@@ -674,14 +799,286 @@ model Payment {
   @@index([createdAt])
 }
 
-model Tip {
+model ServiceArea {
+  id              String   @id @default(cuid())
+  salonId         String
+  name            String
+  centerLatitude  Float
+  centerLongitude Float
+  radiusMeters    Int
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  salon Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@index([salonId, active])
+}
+
+model ServiceQuote {
+  id              String      @id @default(cuid())
+  quoteNumber     String      @unique
+  salonId         String
+  clientId        String
+  serviceId       String
+  technicianId    String?
+  status          QuoteStatus @default(DRAFT)
+  idempotencyKey  String      @unique
+  requestDigest   String
+  currency        String      @default("USD")
+  serviceCents    Int
+  travelCents     Int         @default(0)
+  taxCents        Int         @default(0)
+  totalCents      Int
+  durationMinutes Int
+  serviceAddress  String?
+  latitude        Float?
+  longitude       Float?
+  distanceMeters  Int?
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  service     Service      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  technician  User?        @relation("QuoteTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+  appointment Appointment?
+
+  @@index([salonId, status])
+  @@index([clientId, createdAt])
+}
+
+model ServiceInventoryRequirement {
+  id              String @id @default(cuid())
+  serviceId       String
+  inventoryItemId String
+  quantity        Int
+
+  service       Service       @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@unique([serviceId, inventoryItemId])
+}
+
+model ServiceSkillRequirement {
+  id        String     @id @default(cuid())
+  serviceId String
+  skillName String
+  minLevel  SkillLevel @default(INTERMEDIATE)
+  certified Boolean    @default(false)
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, skillName])
+}
+
+model InventoryReservation {
+  id              String                     @id @default(cuid())
+  appointmentId   String
+  inventoryItemId String
+  quantity        Int
+  status          InventoryReservationStatus @default(ACTIVE)
+  releasedAt      DateTime?
+  consumedAt      DateTime?
+  createdAt       DateTime                   @default(now())
+
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@unique([appointmentId, inventoryItemId])
+  @@index([inventoryItemId, status])
+}
+
+model ChangeOrder {
+  id                   String            @id @default(cuid())
+  appointmentId        String
+  sequence             Int
+  status               ChangeOrderStatus @default(PROPOSED)
+  description          String
+  amountCents          Int
+  durationDeltaMinutes Int               @default(0)
+  requestedBy          String
+  approvedBy           String?
+  approvedAt           DateTime?
+  appliedAt            DateTime?
+  createdAt            DateTime          @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+
+  @@unique([appointmentId, sequence])
+}
+
+model JobProgress {
   id            String   @id @default(cuid())
+  appointmentId String
+  sequence      Int
+  kind          String
+  quantity      Int?
+  notes         String?
+  occurredAt    DateTime
+  createdAt     DateTime @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+
+  @@unique([appointmentId, sequence])
+}
+
+model Invoice {
+  id                String        @id @default(cuid())
+  invoiceNumber     String        @unique
+  salonId           String
+  clientId          String
+  appointmentId     String        @unique
+  status            InvoiceStatus @default(DRAFT)
+  currency          String        @default("USD")
+  subtotalCents     Int
+  taxCents          Int
+  totalCents        Int
+  paidCents         Int           @default(0)
+  provider          String?
+  providerInvoiceId String?       @unique
+  issuedAt          DateTime?
+  paidAt            DateTime?
+  voidedAt          DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  salon       Salon       @relation(fields: [salonId], references: [id], onDelete: Restrict)
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+
+  @@index([salonId, status])
+}
+
+model PaymentRefund {
+  id               String   @id @default(cuid())
+  paymentId        String
+  amountCents      Int
+  reason           String
+  provider         String
+  providerRefundId String   @unique
+  idempotencyKey   String   @unique
+  providerEventId  String
+  createdAt        DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId, createdAt])
+}
+
+model AppointmentEvent {
+  id             String             @id @default(cuid())
+  salonId        String
+  appointmentId  String
+  sequence       Int
+  eventType      String
+  fromStatus     AppointmentStatus?
+  toStatus       AppointmentStatus?
+  actorId        String?
+  actorRole      String
+  idempotencyKey String
+  payload        Json
+  previousHash   String?
+  eventHash      String             @unique
+  occurredAt     DateTime           @default(now())
+
+  salon       Salon       @relation(fields: [salonId], references: [id], onDelete: Restrict)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  actor       User?       @relation("AppointmentEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@unique([appointmentId, sequence])
+  @@unique([appointmentId, idempotencyKey])
+  @@index([salonId, occurredAt])
+}
+
+model FieldProviderEvent {
+  id              String                 @id @default(cuid())
+  salonId         String
+  appointmentId   String?
+  provider        String
+  providerEventId String
+  operation       ProviderOperation
+  direction       ProviderEventDirection
+  idempotencyKey  String
+  payloadDigest   String
+  payload         Json
+  occurredAt      DateTime
+  receivedAt      DateTime               @default(now())
+
+  salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Restrict)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerEventId])
+  @@unique([provider, idempotencyKey, operation])
+  @@index([appointmentId, receivedAt])
+}
+
+model OfflineCommand {
+  id              String               @id @default(cuid())
+  salonId         String
+  appointmentId   String
+  deviceId        String
+  commandId       String
+  expectedVersion Int
+  operation       String
+  payload         Json
+  status          OfflineCommandStatus @default(PENDING)
+  errorCode       String?
+  appliedAt       DateTime?
+  createdAt       DateTime             @default(now())
+
+  salon       Salon       @relation(fields: [salonId], references: [id], onDelete: Restrict)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+
+  @@unique([deviceId, commandId])
+  @@index([salonId, status, createdAt])
+}
+
+model KioskDevice {
+  id         String    @id @default(cuid())
+  salonId    String
+  name       String
+  tokenHash  String    @unique
+  active     Boolean   @default(true)
+  lastSeenAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  salon Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@index([salonId, active])
+}
+
+model AppointmentCommunication {
+  id                String         @id @default(cuid())
+  salonId           String
+  appointmentId     String
+  channel           MessageChannel
+  recipient         String
+  template          String
+  bodyDigest        String
+  idempotencyKey    String         @unique
+  provider          String
+  providerMessageId String         @unique
+  status            MessageStatus
+  sentAt            DateTime?
+  createdAt         DateTime       @default(now())
+
+  salon       Salon       @relation(fields: [salonId], references: [id], onDelete: Restrict)
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+
+  @@index([appointmentId, createdAt])
+}
+
+model Tip {
+  id            String        @id @default(cuid())
   salonId       String
-  appointmentId String   @unique
+  appointmentId String        @unique
   technicianId  String
   amount        Float
   method        PaymentMethod
-  createdAt     DateTime @default(now())
+  createdAt     DateTime      @default(now())
 
   // Relations
   salon       Salon       @relation(fields: [salonId], references: [id], onDelete: Cascade)
@@ -718,33 +1115,33 @@ model GalleryPhoto {
 }
 
 model BookingSettings {
-  id                    String   @id @default(cuid())
-  salonId               String   @unique
-  allowOnlineBooking    Boolean  @default(true)
-  requireDeposit        Boolean  @default(false)
-  depositAmount         Float?
-  minAdvanceHours       Int      @default(2)
-  maxAdvanceDays        Int      @default(30)
-  allowWalkIns          Boolean  @default(true)
-  confirmationRequired  Boolean  @default(true)
-  reminderHoursBefore   Int      @default(24)
-  cancellationHours     Int      @default(24)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  salonId              String   @unique
+  allowOnlineBooking   Boolean  @default(true)
+  requireDeposit       Boolean  @default(false)
+  depositAmount        Float?
+  minAdvanceHours      Int      @default(2)
+  maxAdvanceDays       Int      @default(30)
+  allowWalkIns         Boolean  @default(true)
+  confirmationRequired Boolean  @default(true)
+  reminderHoursBefore  Int      @default(24)
+  cancellationHours    Int      @default(24)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@index([salonId])
 }
 
 model SMSLog {
-  id          String   @id @default(cuid())
-  salonId     String
-  toPhone     String
-  fromPhone   String?
-  message     String
-  twilioSid   String?
-  status      String
-  errorCode   String?
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  salonId   String
+  toPhone   String
+  fromPhone String?
+  message   String
+  twilioSid String?
+  status    String
+  errorCode String?
+  createdAt DateTime @default(now())
 
   @@index([salonId])
   @@index([toPhone])
@@ -776,21 +1173,21 @@ model ServiceAddon {
 
 // Recurring Appointments
 model RecurringAppointment {
-  id              String   @id @default(cuid())
-  salonId         String
-  clientId        String
-  technicianId    String
-  serviceId       String
-  frequency       RecurringFrequency
-  dayOfWeek       Int?     // 0-6 for weekly
-  dayOfMonth      Int?     // 1-31 for monthly
-  preferredTime   String   // e.g., "10:00"
-  startDate       DateTime
-  endDate         DateTime?
-  active          Boolean  @default(true)
-  nextOccurrence  DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String             @id @default(cuid())
+  salonId        String
+  clientId       String
+  technicianId   String
+  serviceId      String
+  frequency      RecurringFrequency
+  dayOfWeek      Int? // 0-6 for weekly
+  dayOfMonth     Int? // 1-31 for monthly
+  preferredTime  String // e.g., "10:00"
+  startDate      DateTime
+  endDate        DateTime?
+  active         Boolean            @default(true)
+  nextOccurrence DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   salon      Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
   client     Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -811,14 +1208,14 @@ enum RecurringFrequency {
 
 // AI Chat Messages
 model ChatMessage {
-  id            String   @id @default(cuid())
-  salonId       String
-  sessionId     String   // Groups messages in a conversation
-  role          String   // 'user' or 'assistant'
-  content       String
-  clientId      String?
-  metadata      Json?    // Store any additional context
-  createdAt     DateTime @default(now())
+  id        String   @id @default(cuid())
+  salonId   String
+  sessionId String // Groups messages in a conversation
+  role      String // 'user' or 'assistant'
+  content   String
+  clientId  String?
+  metadata  Json? // Store any additional context
+  createdAt DateTime @default(now())
 
   salon  Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
   client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
@@ -831,19 +1228,19 @@ model ChatMessage {
 
 // Client Reviews
 model Review {
-  id           String       @id @default(cuid())
-  salonId      String
-  clientId     String?
-  appointmentId String?     @unique
-  platform     ReviewPlatform
-  rating       Int          // 1-5
-  content      String?
-  response     String?      // Salon's response
-  respondedAt  DateTime?
-  externalId   String?      // ID from Google/Yelp
-  reviewDate   DateTime     @default(now())
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id            String         @id @default(cuid())
+  salonId       String
+  clientId      String?
+  appointmentId String?        @unique
+  platform      ReviewPlatform
+  rating        Int // 1-5
+  content       String?
+  response      String? // Salon's response
+  respondedAt   DateTime?
+  externalId    String? // ID from Google/Yelp
+  reviewDate    DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
   client      Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
@@ -865,16 +1262,16 @@ enum ReviewPlatform {
 
 // No-Show Predictions
 model NoShowPrediction {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   salonId       String
-  appointmentId String   @unique
-  riskScore     Float    // 0-1 probability
+  appointmentId String    @unique
+  riskScore     Float // 0-1 probability
   riskLevel     RiskLevel
-  factors       Json     // Factors that contributed to score
-  notified      Boolean  @default(false)
-  outcome       String?  // SHOWED, NO_SHOW, CANCELLED
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  factors       Json // Factors that contributed to score
+  notified      Boolean   @default(false)
+  outcome       String? // SHOWED, NO_SHOW, CANCELLED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   salon       Salon       @relation(fields: [salonId], references: [id], onDelete: Cascade)
   appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
@@ -892,17 +1289,17 @@ enum RiskLevel {
 
 // Email Logs (similar to SMS logs)
 model EmailLog {
-  id          String   @id @default(cuid())
-  salonId     String
-  toEmail     String
-  fromEmail   String?
-  subject     String
-  body        String
-  status      String
-  provider    String?  // sendgrid, ses, etc.
-  externalId  String?
-  errorMsg    String?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  salonId    String
+  toEmail    String
+  fromEmail  String?
+  subject    String
+  body       String
+  status     String
+  provider   String? // sendgrid, ses, etc.
+  externalId String?
+  errorMsg   String?
+  createdAt  DateTime @default(now())
 
   @@index([salonId])
   @@index([toEmail])
@@ -912,15 +1309,15 @@ model EmailLog {
 
 // Real-time Notification Subscriptions
 model NotificationSubscription {
-  id        String   @id @default(cuid())
+  id        String           @id @default(cuid())
   salonId   String
   userId    String?
-  endpoint  String   // Push subscription endpoint or WebSocket ID
+  endpoint  String // Push subscription endpoint or WebSocket ID
   type      NotificationType
-  active    Boolean  @default(true)
-  metadata  Json?    // Keys, auth tokens, etc.
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  active    Boolean          @default(true)
+  metadata  Json? // Keys, auth tokens, etc.
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   @@index([salonId])
   @@index([userId])
@@ -942,8 +1339,8 @@ model AppointmentService {
   id            String   @id @default(cuid())
   appointmentId String
   serviceId     String
-  price         Float    // Price at time of booking
-  duration      Int      // Duration in minutes
+  price         Float // Price at time of booking
+  duration      Int // Duration in minutes
   order         Int      @default(0) // Order of services
   createdAt     DateTime @default(now())
 
@@ -963,13 +1360,13 @@ enum TechnicianLevel {
 }
 
 model ServicePricing {
-  id         String          @id @default(cuid())
-  salonId    String
-  serviceId  String
-  level      TechnicianLevel
-  price      Float
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+  id        String          @id @default(cuid())
+  salonId   String
+  serviceId String
+  level     TechnicianLevel
+  price     Float
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
   salon   Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
   service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
@@ -981,12 +1378,13 @@ model ServicePricing {
 
 // Split payments - Multiple payment methods for one transaction
 model PaymentSplit {
-  id        String        @id @default(cuid())
-  paymentId String
-  method    PaymentMethod
-  amount    Float
-  reference String?       // Card last 4, gift card code, etc.
-  createdAt DateTime      @default(now())
+  id             String        @id @default(cuid())
+  paymentId      String
+  method         PaymentMethod
+  amount         Float
+  reference      String? // Card last 4, gift card code, etc.
+  idempotencyKey String        @unique
+  createdAt      DateTime      @default(now())
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 
@@ -995,20 +1393,20 @@ model PaymentSplit {
 
 // Commission tracking
 model Commission {
-  id           String         @id @default(cuid())
-  salonId      String
-  technicianId String
-  appointmentId String?
-  serviceAmount Float         // Service revenue
-  productAmount Float         @default(0) // Product revenue
-  tipAmount    Float          @default(0)
-  commissionRate Float        // Percentage (e.g., 0.45 for 45%)
-  commissionAmount Float      // Calculated commission
-  period       String         // e.g., "2024-01" for monthly
-  status       CommissionStatus @default(PENDING)
-  paidAt       DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id               String           @id @default(cuid())
+  salonId          String
+  technicianId     String
+  appointmentId    String?
+  serviceAmount    Float // Service revenue
+  productAmount    Float            @default(0) // Product revenue
+  tipAmount        Float            @default(0)
+  commissionRate   Float // Percentage (e.g., 0.45 for 45%)
+  commissionAmount Float // Calculated commission
+  period           String // e.g., "2024-01" for monthly
+  status           CommissionStatus @default(PENDING)
+  paidAt           DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
   technician User  @relation("TechnicianCommissions", fields: [technicianId], references: [id], onDelete: Cascade)
@@ -1027,13 +1425,13 @@ enum CommissionStatus {
 
 // Commission rules per technician
 model CommissionRule {
-  id           String  @id @default(cuid())
+  id           String   @id @default(cuid())
   salonId      String
   technicianId String
-  serviceRate  Float   @default(0.45) // 45% default
-  productRate  Float   @default(0.10) // 10% on products
-  tipRate      Float   @default(1.0)  // 100% of tips
-  active       Boolean @default(true)
+  serviceRate  Float    @default(0.45) // 45% default
+  productRate  Float    @default(0.10) // 10% on products
+  tipRate      Float    @default(1.0) // 100% of tips
+  active       Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -1073,16 +1471,16 @@ model RetailProduct {
 }
 
 model RetailSale {
-  id          String   @id @default(cuid())
-  salonId     String
-  productId   String
-  clientId    String?
-  soldById    String?  // Staff who made the sale
-  quantity    Int
-  unitPrice   Float
-  totalPrice  Float
-  paymentId   String?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  salonId    String
+  productId  String
+  clientId   String?
+  soldById   String? // Staff who made the sale
+  quantity   Int
+  unitPrice  Float
+  totalPrice Float
+  paymentId  String?
+  createdAt  DateTime @default(now())
 
   salon   Salon         @relation(fields: [salonId], references: [id], onDelete: Cascade)
   product RetailProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -1101,13 +1499,13 @@ model ServicePackage {
   salonId     String
   name        String
   description String?
-  price       Float    // Discounted package price
+  price       Float // Discounted package price
   validDays   Int      @default(365) // Days until expiry
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  salon    Salon                  @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  salon    Salon            @relation(fields: [salonId], references: [id], onDelete: Cascade)
   services PackageService[]
   sales    PackageSale[]
 
@@ -1130,13 +1528,13 @@ model PackageService {
 }
 
 model PackageSale {
-  id          String    @id @default(cuid())
-  salonId     String
-  packageId   String
-  clientId    String
-  purchaseDate DateTime @default(now())
-  expiresAt   DateTime
-  amountPaid  Float
+  id                String   @id @default(cuid())
+  salonId           String
+  packageId         String
+  clientId          String
+  purchaseDate      DateTime @default(now())
+  expiresAt         DateTime
+  amountPaid        Float
   servicesRemaining Json // Track remaining services
 
   salon   Salon          @relation(fields: [salonId], references: [id], onDelete: Cascade)
@@ -1151,18 +1549,18 @@ model PackageSale {
 
 // Membership plans
 model MembershipPlan {
-  id             String   @id @default(cuid())
-  salonId        String
-  name           String
-  description    String?
-  monthlyPrice   Float
-  annualPrice    Float?   // Optional annual pricing
-  benefits       Json     // Array of benefit descriptions
-  discountPercent Float   @default(0) // Discount on services
-  freeServices   Json?    // e.g., {"manicure": 2, "pedicure": 1} per month
-  active         Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String   @id @default(cuid())
+  salonId         String
+  name            String
+  description     String?
+  monthlyPrice    Float
+  annualPrice     Float? // Optional annual pricing
+  benefits        Json // Array of benefit descriptions
+  discountPercent Float    @default(0) // Discount on services
+  freeServices    Json? // e.g., {"manicure": 2, "pedicure": 1} per month
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   salon       Salon        @relation(fields: [salonId], references: [id], onDelete: Cascade)
   memberships Membership[]
@@ -1181,7 +1579,7 @@ model Membership {
   endDate      DateTime?
   billingCycle BillingCycle     @default(MONTHLY)
   nextBillDate DateTime?
-  servicesUsed Json?            // Track used free services this period
+  servicesUsed Json? // Track used free services this period
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 
@@ -1209,17 +1607,17 @@ enum BillingCycle {
 
 // Time-off requests
 model TimeOffRequest {
-  id           String            @id @default(cuid())
+  id           String        @id @default(cuid())
   salonId      String
   technicianId String
   startDate    DateTime
   endDate      DateTime
   reason       String?
-  status       TimeOffStatus     @default(PENDING)
+  status       TimeOffStatus @default(PENDING)
   approvedById String?
   approvedAt   DateTime?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
   technician User  @relation("TechnicianTimeOff", fields: [technicianId], references: [id], onDelete: Cascade)
@@ -1240,16 +1638,16 @@ enum TimeOffStatus {
 
 // Technician skills/certifications
 model TechnicianSkill {
-  id           String    @id @default(cuid())
+  id           String     @id @default(cuid())
   salonId      String
   technicianId String
   skillName    String
   level        SkillLevel @default(INTERMEDIATE)
-  certified    Boolean   @default(false)
+  certified    Boolean    @default(false)
   certExpiry   DateTime?
   notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   salon      Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
   technician User  @relation("TechnicianSkills", fields: [technicianId], references: [id], onDelete: Cascade)
@@ -1270,13 +1668,13 @@ enum SkillLevel {
 model Station {
   id        String   @id @default(cuid())
   salonId   String
-  name      String   // e.g., "Chair 1", "Station A"
-  type      String?  // e.g., "nail", "hair", "spa"
+  name      String // e.g., "Chair 1", "Station A"
+  type      String? // e.g., "nail", "hair", "spa"
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  salon       Salon             @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  salon       Salon               @relation(fields: [salonId], references: [id], onDelete: Cascade)
   assignments StationAssignment[]
 
   @@unique([salonId, name])
@@ -1287,8 +1685,8 @@ model StationAssignment {
   id           String   @id @default(cuid())
   stationId    String
   technicianId String
-  dayOfWeek    Int?     // null = all days
-  startTime    String?  // null = all day
+  dayOfWeek    Int? // null = all days
+  startTime    String? // null = all day
   endTime      String?
   createdAt    DateTime @default(now())
 
@@ -1303,7 +1701,7 @@ model StationAssignment {
 model ClientFamily {
   id        String   @id @default(cuid())
   salonId   String
-  name      String   // Family name, e.g., "The Smiths"
+  name      String // Family name, e.g., "The Smiths"
   createdAt DateTime @default(now())
 
   salon   Salon    @relation(fields: [salonId], references: [id], onDelete: Cascade)
@@ -1314,16 +1712,16 @@ model ClientFamily {
 
 // Referral tracking
 model Referral {
-  id             String        @id @default(cuid())
-  salonId        String
-  referrerId     String        // Client who referred
-  referredId     String        // New client
-  status         ReferralStatus @default(PENDING)
-  rewardType     String?       // e.g., "points", "discount", "free_service"
-  rewardValue    Float?
-  rewardGivenAt  DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id            String         @id @default(cuid())
+  salonId       String
+  referrerId    String // Client who referred
+  referredId    String // New client
+  status        ReferralStatus @default(PENDING)
+  rewardType    String? // e.g., "points", "discount", "free_service"
+  rewardValue   Float?
+  rewardGivenAt DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   salon    Salon  @relation(fields: [salonId], references: [id], onDelete: Cascade)
   referrer Client @relation("ReferredBy", fields: [referrerId], references: [id], onDelete: Cascade)
@@ -1337,27 +1735,26 @@ model Referral {
 
 enum ReferralStatus {
   PENDING
-  QUALIFIED   // Referred client made first purchase
-  REWARDED    // Reward given to referrer
+  QUALIFIED // Referred client made first purchase
+  REWARDED // Reward given to referrer
   EXPIRED
 }
-
 
 // ============================================
 // AI RESULTS POOL (JSONB observability)
 // ============================================
 
 model AiResult {
-  id          String   @id @default(cuid())
-  feature     String
-  salonId     String?
-  userId      String?
-  model       String
-  input       Json
-  output      Json
-  tokens      Int?
-  durationMs  Int?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  feature    String
+  salonId    String?
+  userId     String?
+  model      String
+  input      Json
+  output     Json
+  tokens     Int?
+  durationMs Int?
+  createdAt  DateTime @default(now())
 
   @@index([salonId, feature])
   @@index([feature, createdAt])
@@ -1368,21 +1765,20 @@ model AiResult {
 // ============================================
 
 model VoiceCall {
-  id          String   @id @default(cuid())
-  salonId     String
-  fromNumber  String?
-  toNumber    String?
-  callSid     String?  @unique
-  status      String   @default("ringing") // ringing, in-progress, completed, failed
-  transcript  String?
-  duration    Int?
-  intent      String?
-  outcome     String?  // booked, transferred, voicemail, abandoned
+  id            String   @id @default(cuid())
+  salonId       String
+  fromNumber    String?
+  toNumber      String?
+  callSid       String?  @unique
+  status        String   @default("ringing") // ringing, in-progress, completed, failed
+  transcript    String?
+  duration      Int?
+  intent        String?
+  outcome       String? // booked, transferred, voicemail, abandoned
   appointmentId String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([salonId, createdAt])
   @@index([status])
 }
-

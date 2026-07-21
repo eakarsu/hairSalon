@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
             a.service.name,
             a.technician.name,
             a.status,
-            a.totalPrice,
+            (a.totalCents / 100).toFixed(2),
           ]) + '\n';
         });
         break;
@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
         const items = await prisma.inventoryItem.findMany({ where: { salonId }, orderBy: { name: 'asc' } });
         csvContent = toCsvRow(['Name', 'SKU', 'Category', 'Quantity', 'Min Stock', 'Unit Cost', 'Supplier']) + '\n';
         items.forEach((i) => {
-          csvContent += toCsvRow([i.name, i.sku, i.category, i.quantity, i.minStock, i.unitCost, i.supplier]) + '\n';
+          csvContent += toCsvRow([i.name, i.sku, i.category, i.quantity, i.minQuantity, i.costPrice, i.supplier]) + '\n';
         });
         break;
       }
@@ -105,10 +105,14 @@ export async function GET(request: NextRequest) {
         break;
       }
       case 'gift-cards': {
-        const giftCards = await prisma.giftCard.findMany({ where: { salonId }, orderBy: { createdAt: 'desc' } });
+        const giftCards = await prisma.giftCard.findMany({
+          where: { salonId },
+          include: { recipient: { select: { name: true } } },
+          orderBy: { createdAt: 'desc' },
+        });
         csvContent = toCsvRow(['Code', 'Initial Balance', 'Current Balance', 'Status', 'Purchaser', 'Recipient', 'Created At', 'Expires At']) + '\n';
         giftCards.forEach((g) => {
-          csvContent += toCsvRow([g.code, g.initialBalance, g.currentBalance, g.status, g.purchaserName, g.recipientName, g.createdAt.toISOString().split('T')[0], g.expiresAt?.toISOString().split('T')[0]]) + '\n';
+          csvContent += toCsvRow([g.code, g.initialValue, g.balance, g.status, g.purchasedBy, g.recipient?.name, g.createdAt.toISOString().split('T')[0], g.expiresAt?.toISOString().split('T')[0]]) + '\n';
         });
         break;
       }

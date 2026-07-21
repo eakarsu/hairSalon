@@ -51,7 +51,7 @@ interface TimeSlot {
   technicianName: string;
 }
 
-const steps = ['Select Service', 'Choose Date & Time', 'Your Information', 'Confirmation'];
+const steps = ['Select Service', 'Choose Date & Time', 'Your Information', 'Review Quote', 'Confirmation'];
 
 export default function PublicBookingPage() {
   const params = useParams();
@@ -84,6 +84,15 @@ export default function PublicBookingPage() {
     serviceName: string;
     technicianName: string;
     startTime: string;
+  } | null>(null);
+  const [quote, setQuote] = useState<{
+    id: string;
+    serviceCents: number;
+    travelCents: number;
+    taxCents: number;
+    totalCents: number;
+    currency: string;
+    expiresAt: string;
   } | null>(null);
 
   // Fetch services on mount
@@ -159,26 +168,24 @@ export default function PublicBookingPage() {
     setActiveStep(2);
   };
 
-  const handleSubmit = async () => {
+  const handleGetQuote = async () => {
     if (!selectedService || !selectedSlot) return;
 
     setLoading(true);
     setError('');
 
     try {
-      const res = await fetch('/api/public/booking/create', {
+      const res = await fetch('/api/field-service/quotes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({
           salonId,
           serviceId: selectedService.id,
           technicianId: selectedSlot.technicianId,
-          date: selectedDate,
-          time: selectedSlot.time,
           clientName,
           clientPhone,
           clientEmail,
-          notes,
+          marketingOptIn: false,
         }),
       });
 
@@ -188,8 +195,40 @@ export default function PublicBookingPage() {
         throw new Error(data.error || 'Booking failed');
       }
 
-      setBookingResult(data.appointment);
+      setQuote(data.quote);
       setActiveStep(3);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Booking failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!quote || !selectedSlot) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/field-service/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        body: JSON.stringify({
+          quoteId: quote.id,
+          technicianId: selectedSlot.technicianId,
+          startTime: new Date(`${selectedDate}T${selectedSlot.time}:00`).toISOString(),
+          notes,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Booking failed');
+      sessionStorage.setItem(`appointment-token:${data.appointment.id}`, data.appointment.customerAccessToken);
+      setBookingResult({
+        id: data.appointment.id,
+        serviceName: selectedService?.name || '',
+        technicianName: selectedSlot.technicianName,
+        startTime: data.appointment.startTime,
+      });
+      setActiveStep(4);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Booking failed');
     } finally {
@@ -395,16 +434,34 @@ export default function PublicBookingPage() {
               <Button
                 variant="contained"
                 size="large"
-                onClick={handleSubmit}
+                onClick={handleGetQuote}
                 disabled={loading || !clientName || !clientPhone}
               >
-                {loading ? <CircularProgress size={24} /> : 'Confirm Booking'}
+                {loading ? <CircularProgress size={24} /> : 'Get Final Quote'}
               </Button>
             </Box>
           </Box>
         );
 
       case 3:
+        return quote ? (
+          <Box>
+            <Typography variant="h6" gutterBottom>Review your quote</Typography>
+            <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}><Typography>Service</Typography><Typography>${(quote.serviceCents / 100).toFixed(2)}</Typography></Box>
+              {quote.travelCents > 0 && <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}><Typography>Travel</Typography><Typography>${(quote.travelCents / 100).toFixed(2)}</Typography></Box>}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}><Typography>Tax</Typography><Typography>${(quote.taxCents / 100).toFixed(2)}</Typography></Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', borderTop: 1, borderColor: 'divider', pt: 2, mt: 2 }}><Typography variant="h6">Total</Typography><Typography variant="h6">${(quote.totalCents / 100).toFixed(2)} {quote.currency}</Typography></Box>
+            </Paper>
+            <Alert severity="info" sx={{ mb: 3 }}>This quote expires at {format(new Date(quote.expiresAt), 'h:mm a')}.</Alert>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Button onClick={() => setActiveStep(2)}>Back</Button>
+              <Button variant="contained" onClick={handleConfirmBooking} disabled={loading}>{loading ? <CircularProgress size={24} /> : 'Accept Quote & Book'}</Button>
+            </Box>
+          </Box>
+        ) : null;
+
+      case 4:
         return (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <CheckCircleIcon sx={{ fontSize: 80, color: 'success.main', mb: 2 }} />
@@ -444,6 +501,7 @@ export default function PublicBookingPage() {
                 setClientPhone('');
                 setClientEmail('');
                 setNotes('');
+                setQuote(null);
                 setBookingResult(null);
               }}
             >

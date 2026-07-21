@@ -136,7 +136,7 @@ export default function KioskPage() {
     setError('');
 
     try {
-      const res = await fetch(`/api/kiosk/check-in?salonId=${salonId}&phone=${encodeURIComponent(phone)}`);
+      const res = await fetch(`/api/kiosk/check-in?salonId=${salonId}&phone=${encodeURIComponent(phone)}`, { headers: { 'X-Kiosk-Token': localStorage.getItem('salonflow-kiosk-token') || '' } });
       const data = await res.json();
 
       if (data.client) {
@@ -162,7 +162,7 @@ export default function KioskPage() {
     try {
       const res = await fetch('/api/kiosk/check-in', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Kiosk-Token': localStorage.getItem('salonflow-kiosk-token') || '', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({ appointmentId: selectedAppointment.id }),
       });
       const data = await res.json();
@@ -194,7 +194,7 @@ export default function KioskPage() {
     try {
       const res = await fetch('/api/kiosk/walkin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Kiosk-Token': localStorage.getItem('salonflow-kiosk-token') || '' },
         body: JSON.stringify({
           salonId,
           clientName: walkinName,

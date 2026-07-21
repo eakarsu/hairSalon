@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { requireKiosk } from "@/lib/api-access";
 
 function timeStrLE(a: string, b: string) {
   return a <= b;
@@ -29,49 +30,42 @@ export async function GET(req: NextRequest) {
   if (!salonId) {
     return NextResponse.json({ error: "salonId required" }, { status: 400 });
   }
+  await requireKiosk(req.headers, salonId);
 
-  const stations = await prisma.station
-    .findMany({
+  const stations = await prisma.station.findMany({
       where: { salonId, active: true },
       include: { assignments: { include: { technician: true } } },
       orderBy: { name: "asc" },
-    })
-    .catch(() => [] as any[]);
+    });
 
   const now = new Date();
   const dow = now.getDay();
   const hhmm = nowAsHHmm(now);
 
   const rows = await Promise.all(
-    stations.map(async (st: any) => {
+    stations.map(async (st) => {
       // Pick the assignment that covers right now.
-      const onDuty = (st.assignments || []).find((a: any) => {
+      const onDuty = st.assignments.find((a) => {
         const dayMatch = a.dayOfWeek === null || a.dayOfWeek === dow;
         const startOk = !a.startTime || timeStrLE(a.startTime, hhmm);
         const endOk = !a.endTime || timeStrLE(hhmm, a.endTime);
         return dayMatch && startOk && endOk;
       });
 
-      let appointment: any = null;
-      let nextAppointment: any = null;
-
-      if (onDuty?.technicianId) {
-        try {
-          appointment = await prisma.appointment.findFirst({
+      const appointment = onDuty?.technicianId
+        ? await prisma.appointment.findFirst({
             where: {
               salonId,
               technicianId: onDuty.technicianId,
-              status: { in: ["BOOKED", "CONFIRMED"] },
+              status: { in: ["CONFIRMED", "DISPATCHED", "EN_ROUTE", "IN_PROGRESS", "PARTIALLY_COMPLETED"] },
               startTime: { lte: now },
               endTime: { gte: now },
             },
             include: { client: true, service: true },
-          });
-        } catch {}
-
-        if (!appointment) {
-          try {
-            nextAppointment = await prisma.appointment.findFirst({
+          })
+        : null;
+      const nextAppointment = onDuty?.technicianId && !appointment
+        ? await prisma.appointment.findFirst({
               where: {
                 salonId,
                 technicianId: onDuty.technicianId,
@@ -80,10 +74,8 @@ export async function GET(req: NextRequest) {
               },
               orderBy: { startTime: "asc" },
               include: { client: true, service: true },
-            });
-          } catch {}
-        }
-      }
+            })
+        : null;
 
       const secondsRemaining = appointment
         ? Math.max(

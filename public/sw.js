@@ -1,6 +1,6 @@
-const CACHE_NAME = 'nailflow-v1';
-const STATIC_CACHE = 'nailflow-static-v1';
-const DYNAMIC_CACHE = 'nailflow-dynamic-v1';
+const STATIC_CACHE = 'salonflow-static-v2';
+const DYNAMIC_CACHE = 'salonflow-dynamic-v2';
+const OFFLINE_DB = 'salonflow-offline';
 
 // Assets to cache immediately
 const STATIC_ASSETS = [
@@ -12,11 +12,9 @@ const STATIC_ASSETS = [
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker...');
   event.waitUntil(
     caches.open(STATIC_CACHE)
       .then((cache) => {
-        console.log('[SW] Caching static assets');
         return cache.addAll(STATIC_ASSETS);
       })
       .then(() => self.skipWaiting())
@@ -25,14 +23,12 @@ self.addEventListener('install', (event) => {
 
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating service worker...');
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames
           .filter((name) => name !== STATIC_CACHE && name !== DYNAMIC_CACHE)
           .map((name) => {
-            console.log('[SW] Deleting old cache:', name);
             return caches.delete(name);
           })
       );
@@ -65,22 +61,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For page navigations, try network first
+  // Authenticated HTML is never cached because it may contain tenant data.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
-          // Cache the response
-          const responseClone = response.clone();
-          caches.open(DYNAMIC_CACHE).then((cache) => {
-            cache.put(request, responseClone);
-          });
-          return response;
-        })
-        .catch(() => {
-          return caches.match(request)
-            .then((response) => response || caches.match('/offline.html'));
-        })
+      fetch(request).catch(() => caches.match('/offline.html'))
     );
     return;
   }
@@ -113,14 +97,12 @@ self.addEventListener('fetch', (event) => {
 
 // Push notification event
 self.addEventListener('push', (event) => {
-  console.log('[SW] Push notification received');
-
-  let data = { title: 'NailFlow', body: 'You have a new notification' };
+  let data = { title: 'SalonFlow', body: 'You have a new notification' };
 
   if (event.data) {
     try {
       data = event.data.json();
-    } catch (e) {
+    } catch {
       data.body = event.data.text();
     }
   }
@@ -146,8 +128,6 @@ self.addEventListener('push', (event) => {
 
 // Notification click event
 self.addEventListener('notificationclick', (event) => {
-  console.log('[SW] Notification clicked:', event.action);
-
   event.notification.close();
 
   if (event.action === 'dismiss') {
@@ -176,15 +156,77 @@ self.addEventListener('notificationclick', (event) => {
 
 // Background sync for offline actions
 self.addEventListener('sync', (event) => {
-  console.log('[SW] Background sync:', event.tag);
-
   if (event.tag === 'sync-appointments') {
     event.waitUntil(syncAppointments());
   }
 });
 
 async function syncAppointments() {
-  // Get pending offline actions from IndexedDB
-  // and sync them with the server
-  console.log('[SW] Syncing offline appointments...');
+  const commands = await listOfflineCommands();
+  for (const command of commands) {
+    try {
+      const response = await fetch('/api/field-service/offline', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(command),
+      });
+      if (response.ok) {
+        await deleteOfflineCommand(command.commandId);
+      } else if (response.status === 409) {
+        await notifyWindows({ type: 'OFFLINE_COMMAND_CONFLICT', commandId: command.commandId, details: await response.json() });
+        await deleteOfflineCommand(command.commandId);
+      } else {
+        throw new Error(`sync returned ${response.status}`);
+      }
+    } catch {
+      throw new Error('Appointment sync remains pending');
+    }
+  }
+}
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'QUEUE_APPOINTMENT_COMMAND') return;
+  event.waitUntil(putOfflineCommand(event.data.command).then(() => self.registration.sync.register('sync-appointments')));
+});
+
+function offlineStore(mode) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(OFFLINE_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('commands', { keyPath: 'commandId' });
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result.transaction('commands', mode).objectStore('commands'));
+  });
+}
+
+async function putOfflineCommand(command) {
+  const store = await offlineStore('readwrite');
+  return new Promise((resolve, reject) => {
+    const request = store.put(command);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function listOfflineCommands() {
+  const store = await offlineStore('readonly');
+  return new Promise((resolve, reject) => {
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function deleteOfflineCommand(commandId) {
+  const store = await offlineStore('readwrite');
+  return new Promise((resolve, reject) => {
+    const request = store.delete(commandId);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function notifyWindows(message) {
+  const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+  windows.forEach((client) => client.postMessage(message));
 }

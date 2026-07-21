@@ -1,7 +1,7 @@
 // Security headers + env CORS + pagination helpers for beautyWellnes.
 import { NextResponse } from "next/server";
 
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || "*")
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || process.env.NEXTAUTH_URL || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
@@ -12,7 +12,7 @@ export function corsHeaders(origin?: string | null): Record<string, string> {
     (origin && ALLOWED_ORIGINS.includes(origin));
   return {
     "Access-Control-Allow-Origin":
-      allow && origin ? origin : ALLOWED_ORIGINS.includes("*") ? "*" : "",
+      allow && origin ? origin : "",
     "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,PATCH,OPTIONS",
     "Access-Control-Allow-Headers":
       "Content-Type, Authorization, X-Api-Key, X-User-Id, X-Twilio-Signature, Stripe-Signature",
@@ -34,7 +34,7 @@ export function securityHeaders(): Record<string, string> {
       "camera=(self), microphone=(self), geolocation=(self), payment=(self)",
     "Content-Security-Policy":
       process.env.CSP_HEADER ||
-      "default-src 'self'; img-src 'self' data: https: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://openrouter.ai https://api.stripe.com https://api.twilio.com wss: ws:; frame-src https://js.stripe.com; frame-ancestors 'none'",
+      "default-src 'self'; img-src 'self' data: https: blob:; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.stripe.com https://api.twilio.com wss: ws:; frame-src https://js.stripe.com; frame-ancestors 'none'",
   };
 }
 

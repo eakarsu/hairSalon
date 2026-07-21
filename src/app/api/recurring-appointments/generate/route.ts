@@ -1,23 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { addWeeks, addMonths, setDay, setDate, setHours, setMinutes, startOfDay, addDays, isBefore } from 'date-fns';
+import { addWeeks, addMonths, setDate, setHours, setMinutes, startOfDay, addDays, isBefore } from 'date-fns';
+import { requireActiveUser } from '@/lib/api-access';
+import { routeError } from '@/lib/route-error';
+import { callFieldProvider } from '@/lib/field-service/provider';
+import { bookQuote, createQuote } from '@/lib/field-service/workflow';
 
 // Generate appointments from recurring templates
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.salonId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const user = await requireActiveUser(['OWNER', 'MANAGER', 'FRONTDESK']);
 
     const { daysAhead = 30 } = await request.json();
 
     // Get all active recurring appointments for the salon
     const recurringAppointments = await prisma.recurringAppointment.findMany({
       where: {
-        salonId: session.user.salonId,
+        salonId: user.salonId,
         active: true,
         OR: [
           { endDate: null },
@@ -57,25 +56,12 @@ export async function POST(request: NextRequest) {
         });
 
         if (!existingAppointment) {
-          // Calculate end time
-          const endTime = new Date(nextDate);
-          endTime.setMinutes(endTime.getMinutes() + recurring.service.durationMinutes);
-
-          // Create the appointment
-          const appointment = await prisma.appointment.create({
-            data: {
-              salonId: recurring.salonId,
-              clientId: recurring.clientId,
-              technicianId: recurring.technicianId,
-              serviceId: recurring.serviceId,
-              startTime: nextDate,
-              endTime,
-              status: 'BOOKED',
-              source: 'ONLINE',
-              notes: `Auto-generated from recurring schedule`,
-            },
-          });
-
+          const key = `recurring:${recurring.id}:${nextDate.toISOString()}`;
+          const sourceRef = `quote:${key}`;
+          const taxEvidence = await callFieldProvider('TAX_QUOTE', { sourceRef, idempotencyKey: `tax:${key}`, payload: { salonId: recurring.salonId, currency: 'USD', lineItems: [{ reference: recurring.service.id, description: recurring.service.name, quantity: 1, unitPriceCents: Math.round(recurring.service.basePrice * 100) }] } });
+          const quote = await createQuote({ salonId: recurring.salonId, clientId: recurring.clientId, serviceId: recurring.serviceId, technicianId: recurring.technicianId, idempotencyKey: `quote:${key}`, taxEvidence });
+          const calendarEvidence = await callFieldProvider('CALENDAR_RESERVE', { sourceRef: quote.quoteNumber, idempotencyKey: `calendar:${key}`, payload: { salonId: recurring.salonId, technicianId: recurring.technicianId, startTime: nextDate.toISOString(), durationMinutes: recurring.service.durationMinutes } });
+          const appointment = await bookQuote({ quoteId: quote.id, technicianId: recurring.technicianId, startTime: nextDate, idempotencyKey: key, calendarEvidence, actor: user });
           generatedAppointments.push(appointment);
         }
 
@@ -100,8 +86,7 @@ export async function POST(request: NextRequest) {
       })),
     });
   } catch (error) {
-    console.error('Generate recurring appointments error:', error);
-    return NextResponse.json({ error: 'Failed to generate appointments' }, { status: 500 });
+    return routeError(error);
   }
 }
 

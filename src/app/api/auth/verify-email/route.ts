@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { sha256 } from '@/lib/field-service/canonical';
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,7 +11,7 @@ export async function POST(request: NextRequest) {
     }
 
     const user = await prisma.user.findFirst({
-      where: { emailVerifyToken: token },
+      where: { emailVerifyToken: sha256(token) },
     });
 
     if (!user) {

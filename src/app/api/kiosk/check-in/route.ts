@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { startOfDay, endOfDay } from 'date-fns';
+import { requireIdempotencyKey, requireKiosk } from '@/lib/api-access';
+import { routeError } from '@/lib/route-error';
+import { transitionAppointment } from '@/lib/field-service/workflow';
 
 // Search for client's appointments
 export async function GET(request: NextRequest) {
@@ -12,6 +15,7 @@ export async function GET(request: NextRequest) {
     if (!salonId || !phone) {
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
+    await requireKiosk(request.headers, salonId);
 
     const today = new Date();
 
@@ -60,8 +64,7 @@ export async function GET(request: NextRequest) {
       })),
     });
   } catch (error) {
-    console.error('Check-in search error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return routeError(error);
   }
 }
 
@@ -75,9 +78,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Appointment ID required' }, { status: 400 });
     }
 
-    const appointment = await prisma.appointment.update({
+    const existing = await prisma.appointment.findUnique({ where: { id: appointmentId } });
+    if (!existing) return NextResponse.json({ error: 'Appointment not found' }, { status: 404 });
+    const device = await requireKiosk(request.headers, existing.salonId);
+    const key = requireIdempotencyKey(request.headers);
+    await transitionAppointment({ appointmentId, toStatus: 'CONFIRMED', idempotencyKey: key, actorRole: `KIOSK:${device.id}` });
+    const appointment = await prisma.appointment.findUniqueOrThrow({
       where: { id: appointmentId },
-      data: { status: 'CONFIRMED' },
       include: {
         service: { select: { name: true } },
         technician: { select: { name: true } },
@@ -96,7 +103,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Check-in confirm error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return routeError(error);
   }
 }

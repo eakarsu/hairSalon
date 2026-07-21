@@ -103,7 +103,6 @@ export default function CalendarPage() {
   const [reminderDialogOpen, setReminderDialogOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [reminderText, setReminderText] = useState('');
-  const [generatingReminder, setGeneratingReminder] = useState(false);
   const [sendingReminder, setSendingReminder] = useState(false);
   const [reminderSuccess, setReminderSuccess] = useState('');
   const [saving, setSaving] = useState(false);
@@ -198,36 +197,8 @@ export default function CalendarPage() {
 
   const handleGenerateReminder = async () => {
     if (!selectedAppointment) return;
-
-    setGeneratingReminder(true);
     setReminderSuccess('');
-    try {
-      const response = await fetch('/api/ai/multilang-reminder', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientName: selectedAppointment.clientName,
-          serviceName: selectedAppointment.serviceName,
-          dateTime: format(new Date(selectedAppointment.startTime), 'MMMM d, yyyy at h:mm a'),
-          language: selectedAppointment.clientLanguage || 'en',
-          clientId: selectedAppointment.clientId,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setReminderText(data.reminder);
-      } else {
-        // If AI fails, use a default reminder
-        setReminderText(`Hi ${selectedAppointment.clientName}, this is a reminder for your ${selectedAppointment.serviceName} appointment on ${format(new Date(selectedAppointment.startTime), 'MMMM d at h:mm a')}. See you soon!`);
-      }
-    } catch (error) {
-      console.error('Failed to generate reminder:', error);
-      // Use default reminder on error
-      setReminderText(`Hi ${selectedAppointment.clientName}, this is a reminder for your ${selectedAppointment.serviceName} appointment on ${format(new Date(selectedAppointment.startTime), 'MMMM d at h:mm a')}. See you soon!`);
-    } finally {
-      setGeneratingReminder(false);
-    }
+    setReminderText(`Hi ${selectedAppointment.clientName}, this is a reminder for your ${selectedAppointment.serviceName} appointment on ${format(new Date(selectedAppointment.startTime), 'MMMM d at h:mm a')}. Reply to confirm or contact the salon to reschedule.`);
   };
 
   const handleSendSMS = async () => {
@@ -238,8 +209,9 @@ export default function CalendarPage() {
     try {
       const response = await fetch('/api/sms/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({
+          appointmentId: selectedAppointment.id,
           to: selectedAppointment.clientPhone,
           message: reminderText,
           type: 'REMINDER',
@@ -276,7 +248,7 @@ export default function CalendarPage() {
 
       const response = await fetch('/api/appointments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({
           clientId: formData.clientId,
           serviceId: formData.serviceId,
@@ -582,9 +554,8 @@ export default function CalendarPage() {
                 </Typography>
                 <Button
                   variant="outlined"
-                  startIcon={generatingReminder ? <CircularProgress size={16} /> : <AutoAwesome />}
+                  startIcon={<AutoAwesome />}
                   onClick={handleGenerateReminder}
-                  disabled={generatingReminder}
                   sx={{ mb: 2 }}
                 >
                   Generate Reminder in {selectedAppointment.clientLanguage.toUpperCase()}

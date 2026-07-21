@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const { technicianId, serviceAmount, productAmount, tipAmount, period } = body;
 
     // Get commission rule for technician
-    let rule = await prisma.commissionRule.findUnique({
+    const rule = await prisma.commissionRule.findUnique({
       where: { technicianId },
     });
 

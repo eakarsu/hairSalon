@@ -10,7 +10,6 @@ import {
   CardActionArea,
   Typography,
   Button,
-  CircularProgress,
   Paper,
   List,
   ListItem,
@@ -18,8 +17,6 @@ import {
   ListItemAvatar,
   Avatar,
   Chip,
-  IconButton,
-  Tooltip,
 } from '@mui/material';
 import {
   TrendingUp,
@@ -30,7 +27,6 @@ import {
   Star,
   EventBusy,
   Loyalty,
-  AutoAwesome,
   Refresh,
   Schedule,
   PersonOff,
@@ -179,8 +175,6 @@ const featureCards = [
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [aiInsights, setAiInsights] = useState<string | null>(null);
-  const [loadingInsights, setLoadingInsights] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -199,31 +193,6 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchAIInsights = async () => {
-    if (!stats) return;
-    setLoadingInsights(true);
-    try {
-      const response = await fetch('/api/ai/kpi-insights', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          noShowRate: stats.noShowRate / 100,
-          repeatVisitRate: stats.repeatVisitRate / 100,
-          loyaltyUsageRate: stats.loyaltyUsage / 100,
-          campaignOpenRate: 0.45,
-          averageTicket: stats.weeklyRevenue / Math.max(stats.todayAppointments * 7, 1),
-          totalAppointments: stats.todayAppointments * 7,
-        }),
-      });
-      const data = await response.json();
-      setAiInsights(data.insights);
-    } catch (error) {
-      console.error('Failed to fetch AI insights:', error);
-    } finally {
-      setLoadingInsights(false);
-    }
-  };
-
   if (loading) {
     return (
       <Box>
@@ -238,23 +207,16 @@ export default function DashboardPage() {
     );
   }
 
-  const mockStats: DashboardStats = stats || {
-    todayAppointments: 12,
-    weeklyRevenue: 4850,
-    activeClients: 156,
-    noShowRate: 8.5,
-    repeatVisitRate: 72,
-    loyaltyUsage: 45,
-    avgRating: 4.8,
-    upcomingAppointments: [
-      { id: '1', clientName: 'Jessica Martinez', serviceName: 'Gel Manicure', technicianName: 'Kim Tran', startTime: new Date().toISOString(), status: 'CONFIRMED' },
-      { id: '2', clientName: 'Amy Wong', serviceName: 'Spa Pedicure', technicianName: 'Jenny Le', startTime: new Date().toISOString(), status: 'BOOKED' },
-      { id: '3', clientName: 'Thu Pham', serviceName: 'Full Set Acrylic', technicianName: 'David Chen', startTime: new Date().toISOString(), status: 'CONFIRMED' },
-    ],
-    recentNoShows: [
-      { id: '1', clientName: 'Sandra Reyes', date: new Date().toISOString() },
-      { id: '2', clientName: 'Tina Chen', date: new Date().toISOString() },
-    ],
+  const dashboardStats: DashboardStats = stats || {
+    todayAppointments: 0,
+    weeklyRevenue: 0,
+    activeClients: 0,
+    noShowRate: 0,
+    repeatVisitRate: 0,
+    loyaltyUsage: 0,
+    avgRating: 0,
+    upcomingAppointments: [],
+    recentNoShows: [],
   };
 
   return (
@@ -282,7 +244,7 @@ export default function DashboardPage() {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Today's Appointments"
-            value={mockStats.todayAppointments}
+            value={dashboardStats.todayAppointments}
             subtitle="scheduled for today"
             icon={<CalendarMonth />}
             trend={{ value: 12, isPositive: true }}
@@ -293,7 +255,7 @@ export default function DashboardPage() {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Weekly Revenue"
-            value={`$${mockStats.weeklyRevenue.toLocaleString()}`}
+            value={`$${dashboardStats.weeklyRevenue.toLocaleString()}`}
             subtitle="this week"
             icon={<AttachMoney />}
             trend={{ value: 8, isPositive: true }}
@@ -304,7 +266,7 @@ export default function DashboardPage() {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Active Clients"
-            value={mockStats.activeClients}
+            value={dashboardStats.activeClients}
             subtitle="visited in 30 days"
             icon={<People />}
             trend={{ value: 5, isPositive: true }}
@@ -315,7 +277,7 @@ export default function DashboardPage() {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <StatCard
             title="Average Rating"
-            value={mockStats.avgRating.toFixed(1)}
+            value={dashboardStats.avgRating.toFixed(1)}
             subtitle="from client reviews"
             icon={<Star />}
             color="#FF9800"
@@ -333,7 +295,7 @@ export default function DashboardPage() {
                   <Typography variant="h6">No-Show Rate</Typography>
                 </Box>
                 <Typography variant="h3" color="error.main">
-                  {mockStats.noShowRate}%
+                  {dashboardStats.noShowRate}%
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   Target: under 5%
@@ -351,7 +313,7 @@ export default function DashboardPage() {
                   <Typography variant="h6">Repeat Visit Rate</Typography>
                 </Box>
                 <Typography variant="h3" color="success.main">
-                  {mockStats.repeatVisitRate}%
+                  {dashboardStats.repeatVisitRate}%
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   Clients returning within 60 days
@@ -369,7 +331,7 @@ export default function DashboardPage() {
                   <Typography variant="h6">Loyalty Engagement</Typography>
                 </Box>
                 <Typography variant="h3" color="primary.main">
-                  {mockStats.loyaltyUsage}%
+                  {dashboardStats.loyaltyUsage}%
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   Active loyalty members
@@ -379,49 +341,15 @@ export default function DashboardPage() {
           </Card>
         </Grid>
 
-        {/* AI Insights */}
-        <Grid size={{ xs: 12, md: 8 }}>
-          <Paper sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <AutoAwesome sx={{ color: 'secondary.main' }} />
-                <Typography variant="h6">AI Business Insights</Typography>
-              </Box>
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={loadingInsights ? <CircularProgress size={16} color="inherit" /> : <AutoAwesome />}
-                onClick={fetchAIInsights}
-                disabled={loadingInsights}
-                sx={{
-                  background: 'linear-gradient(45deg, #E91E63 30%, #9C27B0 90%)',
-                }}
-              >
-                {loadingInsights ? 'Analyzing...' : 'Get Insights'}
-              </Button>
-            </Box>
-            {aiInsights ? (
-              <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
-                {aiInsights}
-              </Typography>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                Click &quot;Get Insights&quot; to receive AI-powered recommendations for improving your salon&apos;s
-                performance based on current KPIs.
-              </Typography>
-            )}
-          </Paper>
-        </Grid>
-
         {/* Recent No-Shows */}
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12 }}>
           <Paper sx={{ p: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
               <PersonOff color="error" />
               <Typography variant="h6">Recent No-Shows</Typography>
             </Box>
             <List dense>
-              {mockStats.recentNoShows.map((noShow) => (
+              {dashboardStats.recentNoShows.map((noShow) => (
                 <ListItem key={noShow.id}>
                   <ListItemAvatar>
                     <Avatar sx={{ bgcolor: 'error.light' }}>
@@ -432,11 +360,6 @@ export default function DashboardPage() {
                     primary={noShow.clientName}
                     secondary={format(new Date(noShow.date), 'MMM d, h:mm a')}
                   />
-                  <Tooltip title="Send recovery message">
-                    <IconButton size="small" color="primary">
-                      <AutoAwesome fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
                 </ListItem>
               ))}
             </List>
@@ -459,7 +382,7 @@ export default function DashboardPage() {
               </Button>
             </Box>
             <List>
-              {mockStats.upcomingAppointments.map((appt) => (
+              {dashboardStats.upcomingAppointments.map((appt) => (
                 <ListItem
                   key={appt.id}
                   sx={{

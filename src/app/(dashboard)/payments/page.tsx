@@ -53,13 +53,16 @@ import { useToast } from '@/components/ToastProvider';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { TableSkeleton, CardsSkeleton } from '@/components/LoadingSkeleton';
 
-type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
+type PaymentStatus = 'PENDING' | 'AUTHORIZED' | 'COMPLETED' | 'FAILED' | 'PARTIALLY_REFUNDED' | 'REFUNDED';
 type PaymentMethod = 'CASH' | 'CARD' | 'GIFT_CARD' | 'OTHER';
 
-interface Client {
+interface AppointmentOption {
   id: string;
-  name: string;
-  phone: string;
+  clientName: string;
+  serviceName: string;
+  startTime: string;
+  totalCents: number;
+  status: string;
 }
 
 interface Payment {
@@ -93,7 +96,9 @@ interface PaymentSummary {
 const STATUS_COLORS: Record<PaymentStatus, 'success' | 'warning' | 'error' | 'default'> = {
   COMPLETED: 'success',
   PENDING: 'warning',
+  AUTHORIZED: 'warning',
   FAILED: 'error',
+  PARTIALLY_REFUNDED: 'warning',
   REFUNDED: 'default',
 };
 
@@ -205,7 +210,7 @@ export default function PaymentsPage() {
 
   const [payments, setPayments] = useState<Payment[]>([]);
   const [summary, setSummary] = useState<PaymentSummary | null>(null);
-  const [clients, setClients] = useState<Client[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -215,7 +220,7 @@ export default function PaymentsPage() {
   // Add Payment Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
-    clientId: '',
+    appointmentId: '',
     amount: '',
     method: 'CASH' as PaymentMethod,
     notes: '',
@@ -236,17 +241,17 @@ export default function PaymentsPage() {
       let url = `/api/payments?period=${period}`;
       if (filterStatus) url += `&status=${filterStatus}`;
 
-      const [paymentsRes, clientsRes] = await Promise.all([
+      const [paymentsRes, appointmentsRes] = await Promise.all([
         fetch(url),
-        fetch('/api/clients'),
+        fetch(`/api/appointments?date=${new Date().toISOString()}`),
       ]);
 
       const paymentsData = await paymentsRes.json();
-      const clientsData = await clientsRes.json();
+      const appointmentsData = await appointmentsRes.json();
 
       setPayments(paymentsData.payments || []);
       setSummary(paymentsData.summary || null);
-      setClients(clientsData.clients || []);
+      setAppointments((appointmentsData.appointments || []).filter((appointment: AppointmentOption) => !['CANCELLED', 'NO_SHOW'].includes(appointment.status)));
     } catch {
       showError('Failed to load payments');
     } finally {
@@ -264,14 +269,14 @@ export default function PaymentsPage() {
     try {
       const res = await fetch('/api/payments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify(formData),
       });
 
       if (!res.ok) throw new Error('Failed to add payment');
 
       setDialogOpen(false);
-      setFormData({ clientId: '', amount: '', method: 'CASH', notes: '' });
+      setFormData({ appointmentId: '', amount: '', method: 'CASH', notes: '' });
       showSuccess('Payment recorded successfully');
       fetchData();
     } catch {
@@ -302,8 +307,8 @@ export default function PaymentsPage() {
     try {
       const res = await fetch(`/api/payments/${refundPayment.id}/refund`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        body: JSON.stringify({ reason: 'Manager-approved refund' }),
       });
 
       if (!res.ok) throw new Error('Refund failed');
@@ -759,13 +764,11 @@ export default function PaymentsPage() {
         <DialogContent>
           <Autocomplete
             sx={{ mt: 2, mb: 2 }}
-            options={clients}
-            getOptionLabel={(option) => `${option.name} (${option.phone})`}
-            onChange={(_, value) =>
-              setFormData((prev) => ({ ...prev, clientId: value?.id || '' }))
-            }
+            options={appointments}
+            getOptionLabel={(option) => `${option.clientName} — ${option.serviceName} (${format(new Date(option.startTime), 'MMM d, h:mm a')})`}
+            onChange={(_, value) => setFormData((prev) => ({ ...prev, appointmentId: value?.id || '', amount: value ? (value.totalCents / 100).toFixed(2) : '' }))}
             renderInput={(params) => (
-              <TextField {...params} label="Client" required />
+              <TextField {...params} label="Appointment" required />
             )}
           />
 
@@ -795,9 +798,6 @@ export default function PaymentsPage() {
               }
             >
               <MenuItem value="CASH">Cash</MenuItem>
-              <MenuItem value="CARD">Card</MenuItem>
-              <MenuItem value="GIFT_CARD">Gift Card</MenuItem>
-              <MenuItem value="OTHER">Other</MenuItem>
             </Select>
           </FormControl>
 
@@ -815,7 +815,7 @@ export default function PaymentsPage() {
           <Button
             variant="contained"
             onClick={handleAddPayment}
-            disabled={!formData.clientId || !formData.amount}
+            disabled={!formData.appointmentId || !formData.amount}
           >
             Record Payment
           </Button>

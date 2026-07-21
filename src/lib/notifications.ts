@@ -75,9 +75,14 @@ export async function subscribeToPush(salonId: string, userId?: string): Promise
       return null;
     }
 
+    const keyBytes = urlBase64ToUint8Array(publicKey);
+    const applicationServerKey = keyBytes.buffer.slice(
+      keyBytes.byteOffset,
+      keyBytes.byteOffset + keyBytes.byteLength,
+    ) as ArrayBuffer;
     const subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(publicKey),
+      applicationServerKey,
     });
 
     // Send subscription to server

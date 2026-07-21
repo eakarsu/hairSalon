@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
     // Calculate next occurrence
     const [hours, minutes] = preferredTime.split(':').map(Number);
     const start = startDate ? new Date(startDate) : new Date();
-    let nextOccurrence = calculateNextOccurrence(start, frequency, dayOfWeek, dayOfMonth, hours, minutes);
+    const nextOccurrence = calculateNextOccurrence(start, frequency, dayOfWeek, dayOfMonth, hours, minutes);
 
     const recurringAppointment = await prisma.recurringAppointment.create({
       data: {

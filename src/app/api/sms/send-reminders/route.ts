@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
 import prisma from '@/lib/prisma';
-import { authOptions } from '@/lib/auth';
-import { twilioClient } from '@/lib/twilio';
-import { addHours, isWithinInterval } from 'date-fns';
+import { addHours } from 'date-fns';
+import { requireActiveUser } from '@/lib/api-access';
+import { routeError } from '@/lib/route-error';
+import { callFieldProvider } from '@/lib/field-service/provider';
+import { recordCommunicationEvidence } from '@/lib/field-service/workflow';
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-
-    if (!session?.user?.salonId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const user = await requireActiveUser(['OWNER', 'MANAGER', 'FRONTDESK']);
 
     const body = await request.json();
     const { hoursBefore = 24 } = body;
@@ -22,7 +19,7 @@ export async function POST(request: NextRequest) {
     // Find appointments in the reminder window that haven't been reminded
     const appointments = await prisma.appointment.findMany({
       where: {
-        salonId: session.user.salonId,
+        salonId: user.salonId,
         status: { in: ['BOOKED'] },
         startTime: {
           gte: now,
@@ -42,36 +39,13 @@ export async function POST(request: NextRequest) {
     for (const apt of appointments) {
       if (!apt.client.phone) continue;
 
-      const result = await twilioClient.sendAppointmentReminder({
-        to: apt.client.phone,
-        clientName: apt.client.name,
-        serviceName: apt.service.name,
-        appointmentTime: apt.startTime,
-        technicianName: apt.technician.name,
-        salonId: session.user.salonId,
-      });
-
-      // Log the SMS
-      await prisma.sMSLog.create({
-        data: {
-          salonId: session.user.salonId,
-          toPhone: apt.client.phone,
-          fromPhone: process.env.TWILIO_PHONE_NUMBER || 'not-configured',
-          message: `Appointment reminder for ${apt.service.name}`,
-          twilioSid: result.sid || null,
-          status: result.success ? 'sent' : 'failed',
-          errorCode: result.error || null,
-        },
-      });
-
-      if (result.success) {
+      const message = `Hi ${apt.client.name}, reminder: ${apt.service.name} with ${apt.technician.name} at ${apt.startTime.toISOString()}. Contact the salon to reschedule.`;
+      const key = `reminder:${apt.id}:${apt.startTime.toISOString()}`;
+      try {
+        const evidence = await callFieldProvider('MESSAGE', { sourceRef: apt.appointmentNumber, idempotencyKey: key, payload: { channel: 'SMS', recipient: apt.client.phone, template: 'APPOINTMENT_REMINDER', body: message } });
+        await recordCommunicationEvidence({ appointmentId: apt.id, channel: 'SMS', recipient: apt.client.phone, template: 'APPOINTMENT_REMINDER', body: message, evidence, idempotencyKey: key });
         sent++;
-        // Update appointment status to confirmed after reminder sent
-        await prisma.appointment.update({
-          where: { id: apt.id },
-          data: { status: 'CONFIRMED' },
-        });
-      } else {
+      } catch {
         failed++;
       }
     }
@@ -85,7 +59,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Send reminders error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return routeError(error);
   }
 }

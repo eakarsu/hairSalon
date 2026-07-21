@@ -334,18 +334,6 @@ export default function TasksPage() {
     );
   };
 
-  // Mock data
-  const mockTasks: Task[] = tasks.length > 0 ? tasks : [
-    { id: '1', title: 'Follow up with Jessica Martinez', description: 'Send birthday discount offer', type: 'FOLLOW_UP', status: 'OPEN', dueDate: new Date().toISOString(), assignedToName: 'Emily Wilson', createdAt: '2024-01-10' },
-    { id: '2', title: 'Order gel polish supplies', description: 'Low on OPI colors', type: 'INVENTORY', status: 'IN_PROGRESS', dueDate: new Date(Date.now() + 86400000).toISOString(), assignedToName: 'Maria Garcia', createdAt: '2024-01-09' },
-    { id: '3', title: 'Schedule staff meeting', description: 'Monthly performance review', type: 'STAFFING', status: 'OPEN', dueDate: new Date(Date.now() + 172800000).toISOString(), assignedToName: 'Linda Nguyen', createdAt: '2024-01-08' },
-    { id: '4', title: 'Review no-show clients', description: 'Contact clients with recent no-shows', type: 'FOLLOW_UP', status: 'OPEN', dueDate: new Date().toISOString(), assignedToName: 'Emily Wilson', createdAt: '2024-01-11' },
-    { id: '5', title: 'Update holiday schedule', description: 'Plan schedule for upcoming holiday', type: 'STAFFING', status: 'DONE', dueDate: new Date(Date.now() - 86400000).toISOString(), assignedToName: 'Maria Garcia', createdAt: '2024-01-05' },
-    { id: '6', title: 'Restock sanitization supplies', description: 'Order hand sanitizer and disinfectant', type: 'INVENTORY', status: 'OPEN', dueDate: new Date(Date.now() + 259200000).toISOString(), assignedToName: null, createdAt: '2024-01-10' },
-    { id: '7', title: 'Train new nail art techniques', description: 'Schedule training session for technicians', type: 'STAFFING', status: 'IN_PROGRESS', dueDate: new Date(Date.now() + 432000000).toISOString(), assignedToName: 'Kim Tran', createdAt: '2024-01-07' },
-    { id: '8', title: 'Contact VIP clients for feedback', description: 'Call Gold and Platinum members', type: 'FOLLOW_UP', status: 'OPEN', dueDate: new Date(Date.now() + 86400000).toISOString(), assignedToName: 'Emily Wilson', createdAt: '2024-01-12' },
-  ];
-
   const tabs = ['All', 'Open', 'In Progress', 'Done'];
   const statusMap: Record<number, string> = {
     1: 'OPEN',
@@ -353,16 +341,16 @@ export default function TasksPage() {
     3: 'DONE',
   };
 
-  const filteredTasks = mockTasks.filter(
+  const filteredTasks = tasks.filter(
     (task) =>
       (selectedTab === 0 || task.status === statusMap[selectedTab]) &&
       (task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (task.description && task.description.toLowerCase().includes(searchQuery.toLowerCase())))
   );
 
-  const openTasks = mockTasks.filter((t) => t.status === 'OPEN').length;
-  const inProgressTasks = mockTasks.filter((t) => t.status === 'IN_PROGRESS').length;
-  const overdueTasks = mockTasks.filter(
+  const openTasks = tasks.filter((t) => t.status === 'OPEN').length;
+  const inProgressTasks = tasks.filter((t) => t.status === 'IN_PROGRESS').length;
+  const overdueTasks = tasks.filter(
     (t) => t.dueDate && isPast(new Date(t.dueDate)) && t.status !== 'DONE' && t.status !== 'CANCELLED'
   ).length;
 
@@ -445,7 +433,7 @@ export default function TasksPage() {
                   <CheckCircle color="success" />
                   <Typography variant="body2" color="text.secondary">Completed</Typography>
                 </Box>
-                <Typography variant="h4">{mockTasks.filter((t) => t.status === 'DONE').length}</Typography>
+                <Typography variant="h4">{tasks.filter((t) => t.status === 'DONE').length}</Typography>
               </CardContent>
             </Card>
           </Grid>

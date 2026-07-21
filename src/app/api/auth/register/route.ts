@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { hash } from 'bcryptjs';
 import prisma from '@/lib/prisma';
-import { v4 as uuidv4 } from 'uuid';
+import { randomBytes } from 'crypto';
+import { sha256 } from '@/lib/field-service/canonical';
+import { sendEmail } from '@/lib/email';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, email, password, phone, salonId, role, preferredLanguage } = body;
+    const { name, email, password, phone, salonId, preferredLanguage } = body;
 
     if (!name || !email || !password || !salonId) {
       return NextResponse.json(
@@ -51,7 +53,7 @@ export async function POST(request: NextRequest) {
     }
 
     const hashedPassword = await hash(password, 12);
-    const emailVerifyToken = uuidv4();
+    const emailVerifyToken = randomBytes(32).toString('hex');
 
     const user = await prisma.user.create({
       data: {
@@ -60,9 +62,9 @@ export async function POST(request: NextRequest) {
         hashedPassword,
         phone: phone || null,
         salonId,
-        role: role || 'FRONTDESK',
+        role: 'CLIENT_USER',
         preferredLanguage: preferredLanguage || 'en',
-        emailVerifyToken,
+        emailVerifyToken: sha256(emailVerifyToken),
         emailVerified: false,
       },
       select: {
@@ -75,10 +77,14 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const baseUrl = process.env.NEXTAUTH_URL;
+    if (!baseUrl) throw new Error('NEXTAUTH_URL is not configured');
+    const emailResult = await sendEmail({ to: user.email, salonId, subject: 'Verify your SalonFlow email', body: `Verify your account: ${baseUrl}/verify-email?token=${encodeURIComponent(emailVerifyToken)}` });
+    if (!emailResult.success) throw new Error(`Verification email failed: ${emailResult.error}`);
+
     return NextResponse.json({
       message: 'User registered successfully. Please verify your email.',
       user,
-      emailVerifyToken,
     }, { status: 201 });
   } catch (error) {
     console.error('Registration error:', error);

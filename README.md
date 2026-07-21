@@ -1,231 +1,92 @@
-# NailFlow AI - Nail Salon Management Platform
+# SalonFlow Operations
 
-A production-ready SaaS application for nail salons featuring AI-powered multi-language messaging, appointment management, loyalty programs, and staff scheduling.
+SalonFlow is a multi-tenant salon and field-service operations application. It implements authoritative quote, availability, booking, dispatch, on-site work, change-order, invoice, payment, refund, cancellation, communication, and offline-recovery workflows backed by PostgreSQL.
 
-## Features
+The application does not create a database, push a schema, seed demo users, invent provider success, or use fallback secrets at startup. Production operations fail closed when their required provider or secret configuration is absent.
 
-- **Multi-Language Support**: AI-generated messages in English, Vietnamese, Spanish, Chinese, and Korean
-- **Appointment Management**: Calendar view with day/week modes, booking, and reminders
-- **Loyalty Program**: Points-based system with Bronze, Silver, Gold, and Platinum tiers
-- **Staff Management**: Technician scheduling, utilization tracking, and task assignments
-- **Campaign Management**: Automated reminders, no-show recovery, and promotional messaging
-- **AI-Powered Insights**: KPI analysis and business recommendations using OpenRouter/Claude
+## Core behavior
 
-## Tech Stack
+- Exact idempotency for quotes, bookings, lifecycle commands, payments, refunds, messages, and offline commands.
+- Concurrent availability protection using PostgreSQL advisory and row locks; schedule, time-off, skill/certification, station, service-area, and inventory checks are re-run when booking commits.
+- Explicit appointment states from quote through dispatch, travel, partial work, completion, no-show, cancellation, and exception recovery.
+- Immutable, hash-chained appointment events plus append-only provider, refund, inventory, and communication evidence.
+- Licensed HTTP adapters for maps, calendar, messaging, tax, payment, and accounting. Provider calls carry bearer authentication and `Idempotency-Key`; payment/refund webhooks require HMAC signatures and reject altered replay.
+- Customer access tokens are hashed at rest. Staff access is loaded from the current database record on each request. Kiosks use revocable, hashed device credentials.
+- A service worker queues only explicit offline commands in IndexedDB and reports optimistic-version conflicts; authenticated pages and API responses are not put in an offline cache.
+- Production startup applies checked-in migrations only. There is no destructive reset or seed path.
 
-- **Frontend**: Next.js 15 (App Router), TypeScript, Material UI (MUI v5)
-- **Backend**: Next.js API Routes
-- **Database**: PostgreSQL with Prisma ORM
-- **Authentication**: NextAuth.js (Email/Password + optional Google OAuth)
-- **AI**: OpenRouter API (Claude/GPT models)
+## Requirements
 
-## Prerequisites
+- Node.js 22
+- Yarn 1.22
+- PostgreSQL 14 or newer
+- HTTPS provider endpoints that implement the evidence contract described below
 
-- Node.js 18+ and Yarn
-- PostgreSQL 14+ (installed and running)
-- OpenRouter API key
-
-## Environment Variables
-
-Create a `.env` file in the root directory:
-
-```env
-# Database
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/nailflow?schema=public"
-
-# NextAuth
-NEXTAUTH_URL="http://localhost:3000"
-NEXTAUTH_SECRET="your-nextauth-secret-change-in-production"
-
-# OpenRouter AI
-OPENROUTER_API_KEY="your-openrouter-api-key"
-OPENROUTER_MODEL="anthropic/claude-3.5-sonnet"
-
-# Optional: Google OAuth
-GOOGLE_CLIENT_ID=""
-GOOGLE_CLIENT_SECRET=""
-```
-
-## Installation
-
-1. **Install dependencies**:
-   ```bash
-   yarn install
-   ```
-
-2. **Set up the database**:
-   ```bash
-   # Create the database
-   createdb nailflow
-
-   # Run migrations
-   npx prisma migrate dev
-
-   # Seed the database with sample data
-   npx prisma db seed
-   ```
-
-3. **Start the development server**:
-   ```bash
-   yarn dev
-   ```
-
-   Or use the start script:
-   ```bash
-   ./start.sh
-   ```
-
-4. Open [http://localhost:3000](http://localhost:3000)
-
-## Demo Accounts
-
-After seeding, use these accounts to log in:
-
-| Role | Email | Password |
-|------|-------|----------|
-| Owner | linda@elegantnails.com | password123 |
-| Manager | maria@elegantnails.com | password123 |
-| Technician | kim@elegantnails.com | password123 |
-| Front Desk | emily@elegantnails.com | password123 |
-
-## Project Structure
-
-```
-src/
-├── app/
-│   ├── (dashboard)/      # Authenticated pages
-│   │   ├── dashboard/    # Main dashboard with KPIs
-│   │   ├── calendar/     # Appointment calendar
-│   │   ├── clients/      # Client management
-│   │   ├── services/     # Service catalog
-│   │   ├── loyalty/      # Loyalty program
-│   │   ├── staff/        # Staff management
-│   │   ├── campaigns/    # Marketing campaigns
-│   │   ├── tasks/        # Task management
-│   │   └── settings/     # System settings
-│   ├── api/
-│   │   ├── ai/           # AI endpoints
-│   │   │   ├── multilang-reminder/
-│   │   │   ├── loyalty-message/
-│   │   │   ├── review-request/
-│   │   │   ├── visit-notes/
-│   │   │   └── kpi-insights/
-│   │   ├── auth/         # NextAuth endpoints
-│   │   └── dashboard/    # Dashboard stats
-│   └── login/            # Login page
-├── components/           # Reusable components
-├── lib/
-│   ├── auth.ts          # NextAuth configuration
-│   ├── prisma.ts        # Prisma client
-│   ├── openRouterClient.ts # AI client
-│   └── theme.ts         # MUI theme
-└── types/               # TypeScript definitions
-```
-
-## AI Features
-
-### 1. Multi-Language Appointment Reminder
-```http
-POST /api/ai/multilang-reminder
-{
-  "clientName": "Jessica",
-  "serviceName": "Gel Manicure",
-  "dateTime": "January 15, 2024 at 2:00 PM",
-  "salonName": "Elegant Nails",
-  "language": "es"
-}
-```
-
-### 2. Loyalty Message Generator
-```http
-POST /api/ai/loyalty-message
-{
-  "clientName": "Amy",
-  "pointsBalance": 850,
-  "tier": "GOLD",
-  "offers": ["10% off next visit"],
-  "language": "zh"
-}
-```
-
-### 3. Review Request Generator
-```http
-POST /api/ai/review-request
-{
-  "serviceName": "Spa Pedicure",
-  "visitDate": "January 10, 2024",
-  "platform": "Google",
-  "language": "vi"
-}
-```
-
-### 4. Visit Notes Summarizer
-```http
-POST /api/ai/visit-notes
-{
-  "bulletNotes": "- almond shape\n- medium length\n- pink ombre\n- gold accent nail"
-}
-```
-
-### 5. KPI Insights Generator
-```http
-POST /api/ai/kpi-insights
-{
-  "noShowRate": 0.08,
-  "repeatVisitRate": 0.72,
-  "loyaltyUsageRate": 0.45,
-  "campaignOpenRate": 0.65,
-  "averageTicket": 55.00,
-  "totalAppointments": 120
-}
-```
-
-## Database Models
-
-- **Salon**: Business information and settings
-- **User**: Staff accounts with roles (Owner, Manager, Technician, Front Desk)
-- **Service**: Service catalog with pricing
-- **Client**: Customer profiles with language preferences
-- **Appointment**: Booking records with status tracking
-- **Visit**: Service details and ratings
-- **LoyaltyAccount**: Points and tier management
-- **LoyaltyTransaction**: Points history
-- **StaffSchedule**: Weekly schedules
-- **Campaign**: Marketing campaigns
-- **CampaignMessage**: Individual message records
-- **Task**: Staff task assignments
-- **AIAuditLog**: AI usage tracking
-
-## Scripts
+Copy `.env.example` to `.env` and replace every required value. Generate secrets with a cryptographically secure generator; each application secret must contain at least 32 characters.
 
 ```bash
-# Development
-yarn dev           # Start dev server
-
-# Database
-yarn db:migrate    # Run migrations
-yarn db:seed       # Seed database
-yarn db:studio     # Open Prisma Studio
-
-# Production
-yarn build         # Build for production
-yarn start         # Start production server
+yarn install --frozen-lockfile
+yarn db:migrate
+yarn dev
 ```
 
-## User Roles & Permissions
+`yarn dev` runs the custom Next.js/Socket.IO server. For production:
 
-| Feature | Owner | Manager | Technician | Front Desk |
-|---------|-------|---------|------------|------------|
-| Dashboard | Full | Full | Limited | Limited |
-| Calendar | Full | Full | Own | View |
-| Clients | Full | Full | View | Full |
-| Services | Full | Full | View | View |
-| Loyalty | Full | Full | View | Manage |
-| Staff | Full | Full | View | View |
-| Campaigns | Full | Full | View | View |
-| Tasks | Full | Full | Own | Own |
-| Settings | Full | Limited | - | - |
+```bash
+yarn build
+./start.sh
+```
 
-## License
+`start.sh` validates required configuration, runs `prisma migrate deploy`, and starts the already-built server. It never installs packages, kills processes, creates databases, pushes schema changes, or seeds data.
 
-MIT
+## Provider contract
+
+Each configured provider receives a JSON `POST` with `operation`, `sourceRef`, and operation-specific fields. It must return JSON shaped like:
+
+```json
+{
+  "licensed": true,
+  "provider": "provider-account-name",
+  "eventId": "provider-unique-event-id",
+  "operation": "PAYMENT_CAPTURE",
+  "sourceRef": "A-APPOINTMENT-NUMBER",
+  "status": "SUCCEEDED",
+  "occurredAt": "2026-07-20T12:00:00.000Z",
+  "result": {
+    "paymentId": "pay_123",
+    "amountCents": 10800
+  }
+}
+```
+
+Allowed operations are `MAP_ROUTE`, `CALENDAR_RESERVE`, `CALENDAR_RELEASE`, `MESSAGE`, `TAX_QUOTE`, `PAYMENT_AUTHORIZE`, `PAYMENT_CAPTURE`, `PAYMENT_REFUND`, `ACCOUNTING_INVOICE`, and `ACCOUNTING_PAYMENT`. The application verifies the operation/source binding, evidence shape, stable event identity, and expected result fields. Provider success is never simulated.
+
+Payment callbacks use `POST /api/field-service/webhooks/{provider}`. Sign the exact raw request body with HMAC-SHA256 using `FIELD_WEBHOOK_SECRET` and send the hexadecimal digest in `X-Field-Signature`.
+
+## Operational setup
+
+1. Apply migrations with a role allowed to create tables, enums, functions, and triggers.
+2. Register the first owner through the public registration flow and verify the delivered email. Public registration cannot assign staff roles.
+3. Configure staff schedules, certified skills, stations/mobile units, service inventory recipes, and service areas before taking bookings.
+4. Create kiosk credentials with `POST /api/kiosk/devices` as an owner or manager. The raw token is returned once; provision it into kiosk local storage and revoke unused devices through the same endpoint.
+5. Configure the six provider base URLs/tokens and webhook delivery before enabling public booking.
+6. Put the application behind TLS and a durable distributed rate limiter/WAF when running more than one instance. The middleware limiter is process-local and provides only a single-instance safety net.
+7. Configure Redis and the Socket.IO Redis adapter packages when horizontally scaling real-time events.
+
+## Verification
+
+```bash
+yarn typecheck
+yarn lint
+yarn test
+yarn build
+yarn audit --groups dependencies --level high
+```
+
+Integration tests require `DATABASE_URL` to point at an isolated PostgreSQL database with the checked-in migrations applied. They deliberately truncate application tables and must never target shared or production data. CI provisions its own PostgreSQL service and covers fresh migration, migration drift, concurrent overbooking, skill and inventory rejection, failure recovery, rescheduling, reassignment, partial work, refunds, cancellation, no-shows, offline conflicts, and database tamper guards.
+
+## Deployment
+
+`docker compose up --build` runs PostgreSQL and the application after all required values referenced in `compose.yaml` are exported. Database storage uses a named volume. The application container waits for PostgreSQL health, applies migrations once, and then starts the server.
+
+Back up PostgreSQL outside the application container, monitor provider-event failures and appointments in `EXCEPTION`, rotate provider/kiosk credentials, and alert on calendar compensation errors because they require provider-side reconciliation.

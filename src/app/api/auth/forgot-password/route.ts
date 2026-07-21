@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { v4 as uuidv4 } from 'uuid';
+import { randomBytes } from 'crypto';
+import { sha256 } from '@/lib/field-service/canonical';
+import { sendEmail } from '@/lib/email';
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,25 +21,24 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const resetToken = uuidv4();
+    const resetToken = randomBytes(32).toString('hex');
     const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        passwordResetToken: resetToken,
+        passwordResetToken: sha256(resetToken),
         passwordResetExpires: resetExpires,
       },
     });
 
-    // In production, send email with reset link
-    // For now, return the token (dev only)
-    console.log(`Password reset token for ${email}: ${resetToken}`);
+    const baseUrl = process.env.NEXTAUTH_URL;
+    if (!baseUrl) throw new Error('NEXTAUTH_URL is not configured');
+    const result = await sendEmail({ to: user.email, salonId: user.salonId, subject: 'Reset your SalonFlow password', body: `Use this link within one hour to reset your password: ${baseUrl}/reset-password?token=${encodeURIComponent(resetToken)}` });
+    if (!result.success) throw new Error(`Password reset email failed: ${result.error}`);
 
     return NextResponse.json({
       message: 'If an account exists with this email, a password reset link has been sent.',
-      // Remove in production:
-      resetToken,
     });
   } catch (error) {
     console.error('Forgot password error:', error);

@@ -14,13 +14,13 @@ interface EmailResult {
   error?: string;
 }
 
-// Email provider configuration
-const emailProvider = process.env.EMAIL_PROVIDER || 'simulation'; // 'sendgrid', 'ses', 'smtp', 'simulation'
+const emailProvider = process.env.EMAIL_PROVIDER || 'sendgrid';
 
 async function sendWithSendGrid(options: EmailOptions): Promise<EmailResult> {
   const apiKey = process.env.SENDGRID_API_KEY;
-  if (!apiKey) {
-    return { success: false, error: 'SendGrid API key not configured' };
+  const fromEmail = options.fromEmail || process.env.FROM_EMAIL;
+  if (!apiKey || !fromEmail) {
+    return { success: false, error: 'SendGrid API key and FROM_EMAIL are required' };
   }
 
   try {
@@ -32,7 +32,7 @@ async function sendWithSendGrid(options: EmailOptions): Promise<EmailResult> {
       },
       body: JSON.stringify({
         personalizations: [{ to: [{ email: options.to }] }],
-        from: { email: options.fromEmail || process.env.FROM_EMAIL || 'noreply@nailflow.ai' },
+        from: { email: fromEmail },
         subject: options.subject,
         content: [{ type: 'text/html', value: options.body }],
       }),
@@ -50,27 +50,6 @@ async function sendWithSendGrid(options: EmailOptions): Promise<EmailResult> {
   }
 }
 
-async function sendWithSES(options: EmailOptions): Promise<EmailResult> {
-  // AWS SES implementation would go here
-  // For now, simulate
-  console.log('[SES] Would send email:', options);
-  return { success: true, messageId: `ses-${Date.now()}` };
-}
-
-async function simulateEmail(options: EmailOptions): Promise<EmailResult> {
-  // Development mode - log email instead of sending
-  console.log('========== SIMULATED EMAIL ==========');
-  console.log(`To: ${options.to}`);
-  console.log(`Subject: ${options.subject}`);
-  console.log(`Body: ${options.body.substring(0, 200)}...`);
-  console.log('======================================');
-
-  // Simulate small delay
-  await new Promise(resolve => setTimeout(resolve, 100));
-
-  return { success: true, messageId: `sim-${Date.now()}` };
-}
-
 export async function sendEmail(options: EmailOptions): Promise<EmailResult> {
   let result: EmailResult;
 
@@ -78,11 +57,8 @@ export async function sendEmail(options: EmailOptions): Promise<EmailResult> {
     case 'sendgrid':
       result = await sendWithSendGrid(options);
       break;
-    case 'ses':
-      result = await sendWithSES(options);
-      break;
     default:
-      result = await simulateEmail(options);
+      result = { success: false, error: `Unsupported email provider: ${emailProvider}` };
   }
 
   // Log the email attempt
@@ -90,7 +66,7 @@ export async function sendEmail(options: EmailOptions): Promise<EmailResult> {
     data: {
       salonId: options.salonId,
       toEmail: options.to,
-      fromEmail: options.fromEmail || process.env.FROM_EMAIL || 'noreply@nailflow.ai',
+      fromEmail: options.fromEmail || process.env.FROM_EMAIL || 'unconfigured',
       subject: options.subject,
       body: options.body,
       status: result.success ? 'SENT' : 'FAILED',

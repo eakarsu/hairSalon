@@ -1,5 +1,4 @@
-// Stripe Payment Client
-// Note: Requires stripe package to be installed: npm install stripe
+import Stripe from 'stripe';
 
 interface CreatePaymentIntentParams {
   amount: number; // Amount in dollars
@@ -31,7 +30,12 @@ class StripeClient {
   }
 
   isConfigured(): boolean {
-    return !!this.secretKey && !!this.publishableKey;
+    return !!this.secretKey;
+  }
+
+  private client(): Stripe {
+    if (!this.secretKey) throw new Error('STRIPE_SECRET_KEY is not configured');
+    return new Stripe(this.secretKey, { apiVersion: '2024-06-20' });
   }
 
   async createPaymentIntent({
@@ -41,36 +45,20 @@ class StripeClient {
     description,
   }: CreatePaymentIntentParams): Promise<PaymentResult> {
     if (!this.isConfigured()) {
-      console.warn('Stripe not configured - payment simulation mode');
-
-      // In development, simulate payment
-      return {
-        success: true,
-        clientSecret: `dev_secret_${Date.now()}`,
-        paymentIntentId: `pi_dev_${Date.now()}`,
-      };
+      return { success: false, error: 'Stripe is not configured' };
     }
 
     try {
-      // In production, this would use the actual Stripe SDK
-      // const stripe = require('stripe')(this.secretKey);
-      // const paymentIntent = await stripe.paymentIntents.create({
-      //   amount: Math.round(amount * 100), // Convert to cents
-      //   currency: 'usd',
-      //   metadata: {
-      //     clientId,
-      //     appointmentId: appointmentId || '',
-      //   },
-      //   description,
-      // });
-
-      // For now, simulate
-      console.log(`[Stripe] Creating payment intent for $${amount}`);
-
+      const paymentIntent = await this.client().paymentIntents.create({
+        amount: Math.round(amount * 100),
+        currency: 'usd',
+        metadata: { clientId, appointmentId: appointmentId || '' },
+        description,
+      });
       return {
         success: true,
-        clientSecret: `sim_secret_${Date.now()}`,
-        paymentIntentId: `pi_sim_${Date.now()}`,
+        clientSecret: paymentIntent.client_secret || undefined,
+        paymentIntentId: paymentIntent.id,
       };
     } catch (error) {
       console.error('Stripe payment intent error:', error);
@@ -83,22 +71,13 @@ class StripeClient {
 
   async confirmPayment(paymentIntentId: string): Promise<PaymentResult> {
     if (!this.isConfigured()) {
-      return {
-        success: true,
-        paymentIntentId,
-      };
+      return { success: false, error: 'Stripe is not configured' };
     }
 
     try {
-      // In production:
-      // const stripe = require('stripe')(this.secretKey);
-      // const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-      // return { success: paymentIntent.status === 'succeeded', paymentIntentId };
-
-      console.log(`[Stripe] Confirming payment ${paymentIntentId}`);
-
+      const paymentIntent = await this.client().paymentIntents.retrieve(paymentIntentId);
       return {
-        success: true,
+        success: paymentIntent.status === 'succeeded',
         paymentIntentId,
       };
     } catch (error) {
@@ -112,25 +91,17 @@ class StripeClient {
 
   async refundPayment(paymentIntentId: string, amount?: number): Promise<RefundResult> {
     if (!this.isConfigured()) {
-      return {
-        success: true,
-        refundId: `re_dev_${Date.now()}`,
-      };
+      return { success: false, error: 'Stripe is not configured' };
     }
 
     try {
-      // In production:
-      // const stripe = require('stripe')(this.secretKey);
-      // const refund = await stripe.refunds.create({
-      //   payment_intent: paymentIntentId,
-      //   amount: amount ? Math.round(amount * 100) : undefined, // Partial refund if amount specified
-      // });
-
-      console.log(`[Stripe] Refunding payment ${paymentIntentId}${amount ? ` ($${amount})` : ''}`);
-
+      const refund = await this.client().refunds.create({
+        payment_intent: paymentIntentId,
+        amount: amount ? Math.round(amount * 100) : undefined,
+      });
       return {
-        success: true,
-        refundId: `re_sim_${Date.now()}`,
+        success: refund.status === 'succeeded' || refund.status === 'pending',
+        refundId: refund.id,
       };
     } catch (error) {
       console.error('Stripe refund error:', error);

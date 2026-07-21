@@ -100,6 +100,7 @@ interface StaffMember {
   preferredLanguage: string;
   appointmentsToday?: number;
   appointmentsWeek?: number;
+  staffSchedules?: ScheduleEntry[];
 }
 
 interface ScheduleEntry {
@@ -319,17 +320,6 @@ export default function StaffPage() {
     toast.showInfo(`Exporting staff as ${format.toUpperCase()}...`);
   };
 
-  // Mock schedule data for the schedule dialog / weekly view
-  const mockSchedule: ScheduleEntry[] = [
-    { id: '1', dayOfWeek: 1, startTime: '09:00', endTime: '19:00', isWorking: true },
-    { id: '2', dayOfWeek: 2, startTime: '09:00', endTime: '19:00', isWorking: true },
-    { id: '3', dayOfWeek: 3, startTime: '09:00', endTime: '19:00', isWorking: true },
-    { id: '4', dayOfWeek: 4, startTime: '09:00', endTime: '19:00', isWorking: true },
-    { id: '5', dayOfWeek: 5, startTime: '09:00', endTime: '19:00', isWorking: true },
-    { id: '6', dayOfWeek: 6, startTime: '09:00', endTime: '18:00', isWorking: true },
-    { id: '7', dayOfWeek: 0, startTime: '10:00', endTime: '17:00', isWorking: false },
-  ];
-
   // Filtering
   const filteredStaff = staff.filter(
     (member) =>
@@ -473,7 +463,7 @@ export default function StaffPage() {
                       </Box>
                     </TableCell>
                     {dayNames.map((_, dayIndex) => {
-                      const scheduleEntry = mockSchedule.find(s => s.dayOfWeek === dayIndex);
+                      const scheduleEntry = tech.staffSchedules?.find(s => s.dayOfWeek === dayIndex);
                       return (
                         <TableCell key={dayIndex} align="center">
                           {scheduleEntry?.isWorking ? (

@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated build output and documented placeholder-only environment template"
+paths = [
+  '''(^|/)(\.next|node_modules)/''',
+  '''^\.env\.example$''',
+]

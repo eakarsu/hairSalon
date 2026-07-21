@@ -1,6 +1,3 @@
-// Twilio SMS Client
-// Note: Requires twilio package to be installed: npm install twilio
-
 interface SendSMSParams {
   to: string;
   message: string;
@@ -13,7 +10,6 @@ interface SMSResult {
   error?: string;
 }
 
-// Placeholder for Twilio client - will use actual Twilio SDK in production
 class TwilioClient {
   private accountSid: string;
   private authToken: string;
@@ -26,38 +22,25 @@ class TwilioClient {
   }
 
   async sendSMS({ to, message, salonId }: SendSMSParams): Promise<SMSResult> {
-    // Validate configuration
     if (!this.accountSid || !this.authToken || !this.fromNumber) {
-      console.warn('Twilio not configured - SMS will be logged but not sent');
-
-      // In development, just log the message
-      console.log(`[SMS to ${to}]: ${message}`);
-
-      return {
-        success: true,
-        sid: `dev_${Date.now()}`,
-      };
+      return { success: false, error: 'Twilio credentials are not configured' };
     }
 
     try {
-      // In production, this would use the actual Twilio SDK
-      // const twilio = require('twilio')(this.accountSid, this.authToken);
-      // const result = await twilio.messages.create({
-      //   body: message,
-      //   from: this.fromNumber,
-      //   to: to,
-      // });
-
-      // For now, simulate sending
-      console.log(`[Twilio SMS] To: ${to}, From: ${this.fromNumber}, Message: ${message}`);
-
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      return {
-        success: true,
-        sid: `sim_${Date.now()}`,
-      };
+      const form = new URLSearchParams({ To: to, From: this.fromNumber, Body: message });
+      const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(this.accountSid)}/Messages.json`, {
+        method: 'POST',
+        headers: {
+          authorization: `Basic ${Buffer.from(`${this.accountSid}:${this.authToken}`).toString('base64')}`,
+          'content-type': 'application/x-www-form-urlencoded',
+          'idempotency-key': `${salonId}:${to}:${Buffer.from(message).toString('base64url').slice(0, 32)}`,
+        },
+        body: form,
+        signal: AbortSignal.timeout(15_000),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.sid) return { success: false, error: result.message || `Twilio returned HTTP ${response.status}` };
+      return { success: true, sid: result.sid };
     } catch (error) {
       console.error('Twilio SMS error:', error);
       return {

@@ -10,13 +10,13 @@ const roboto = Roboto({
 });
 
 export const metadata: Metadata = {
-  title: 'NailFlow AI - Nail Salon Management',
-  description: 'AI-powered nail salon management platform with multi-language support, appointment scheduling, and loyalty programs.',
+  title: 'SalonFlow - Service Operations',
+  description: 'Salon booking, field-service dispatch, payments, inventory, and customer operations.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'NailFlow AI',
+    title: 'SalonFlow',
   },
   formatDetection: {
     telephone: true,

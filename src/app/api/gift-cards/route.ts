@@ -2,14 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import prisma from '@/lib/prisma';
 import { authOptions } from '@/lib/auth';
-import { v4 as uuidv4 } from 'uuid';
+import { randomBytes } from 'crypto';
 
 function generateGiftCardCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(16);
   let code = '';
   for (let i = 0; i < 16; i++) {
     if (i > 0 && i % 4 === 0) code += '-';
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(bytes[i] % chars.length);
   }
   return code;
 }

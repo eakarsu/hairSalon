@@ -39,7 +39,7 @@ function generatePdfHtml(title: string, headers: string[], rows: string[][], sal
     <thead><tr>${headerCells}</tr></thead>
     <tbody>${bodyRows}</tbody>
   </table>
-  <div class="footer">NailFlow AI - Salon Management Platform</div>
+  <div class="footer">SalonFlow - Service Operations</div>
 </body>
 </html>`;
 }
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     const salonId = session.user.salonId;
 
     const salon = await prisma.salon.findUnique({ where: { id: salonId } });
-    const salonName = salon?.name || 'NailFlow AI';
+    const salonName = salon?.name || 'SalonFlow';
 
     let html = '';
 
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
           a.service.name,
           a.technician.name,
           a.status,
-          `$${a.totalPrice}`,
+          `$${(a.totalCents / 100).toFixed(2)}`,
         ]);
         html = generatePdfHtml('Appointments Report', headers, rows, salonName);
         break;
@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
       case 'inventory': {
         const items = await prisma.inventoryItem.findMany({ where: { salonId }, orderBy: { name: 'asc' } });
         const headers = ['Name', 'SKU', 'Category', 'Quantity', 'Min Stock', 'Unit Cost'];
-        const rows = items.map((i) => [i.name, i.sku || '', i.category, String(i.quantity), String(i.minStock), `$${i.unitCost}`]);
+        const rows = items.map((i) => [i.name, i.sku || '', i.category, String(i.quantity), String(i.minQuantity), `$${i.costPrice ?? 0}`]);
         html = generatePdfHtml('Inventory Report', headers, rows, salonName);
         break;
       }

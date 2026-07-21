@@ -1,0 +1,50 @@
+services:
+  database:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: salonflow
+      POSTGRES_USER: salonflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salonflow -d salonflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - salonflow-database:/var/lib/postgresql/data
+
+  application:
+    build: .
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://salonflow:${POSTGRES_PASSWORD}@database:5432/salonflow?schema=public
+      NEXTAUTH_URL: ${NEXTAUTH_URL:?set NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?set NEXTAUTH_SECRET}
+      CUSTOMER_ACCESS_SECRET: ${CUSTOMER_ACCESS_SECRET:?set CUSTOMER_ACCESS_SECRET}
+      FIELD_WEBHOOK_SECRET: ${FIELD_WEBHOOK_SECRET:?set FIELD_WEBHOOK_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS}
+      HOST: 0.0.0.0
+      PORT: 3000
+      MAP_PROVIDER_URL: ${MAP_PROVIDER_URL:-}
+      MAP_PROVIDER_TOKEN: ${MAP_PROVIDER_TOKEN:-}
+      CALENDAR_PROVIDER_URL: ${CALENDAR_PROVIDER_URL:-}
+      CALENDAR_PROVIDER_TOKEN: ${CALENDAR_PROVIDER_TOKEN:-}
+      MESSAGE_PROVIDER_URL: ${MESSAGE_PROVIDER_URL:-}
+      MESSAGE_PROVIDER_TOKEN: ${MESSAGE_PROVIDER_TOKEN:-}
+      TAX_PROVIDER_URL: ${TAX_PROVIDER_URL:-}
+      TAX_PROVIDER_TOKEN: ${TAX_PROVIDER_TOKEN:-}
+      PAYMENT_PROVIDER_URL: ${PAYMENT_PROVIDER_URL:-}
+      PAYMENT_PROVIDER_TOKEN: ${PAYMENT_PROVIDER_TOKEN:-}
+      ACCOUNTING_PROVIDER_URL: ${ACCOUNTING_PROVIDER_URL:-}
+      ACCOUNTING_PROVIDER_TOKEN: ${ACCOUNTING_PROVIDER_TOKEN:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      FROM_EMAIL: ${FROM_EMAIL:-}
+      REDIS_URL: ${REDIS_URL:-}
+    ports:
+      - "${PORT:-3000}:3000"
+    restart: unless-stopped
+
+volumes:
+  salonflow-database:

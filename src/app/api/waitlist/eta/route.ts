@@ -68,13 +68,11 @@ export async function GET(request: NextRequest) {
         active: true,
       },
     });
+    const freeChairs = Math.max(0, availableTechs - ongoingAppointments.length);
 
     // Calculate wait times for each entry
     const waitlistWithETA = waitingEntries.map((entry, index) => {
       // Estimate based on position in queue and service times
-      const busyChairs = ongoingAppointments.length;
-      const freeChairs = Math.max(0, availableTechs - busyChairs);
-
       let estimatedWaitMinutes: number;
 
       if (freeChairs > 0 && index < freeChairs) {

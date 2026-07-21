@@ -3,11 +3,6 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 
-// Disable Next.js body parsing so we can handle the FormData stream directly
-export const config = {
-  api: { bodyParser: false },
-};
-
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);

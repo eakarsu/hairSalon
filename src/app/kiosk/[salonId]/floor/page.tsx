@@ -33,25 +33,33 @@ export default function FloorDisplay() {
   const [stations, setStations] = useState<Station[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string>("");
 
-  async function load() {
-    if (!salonId) return;
-    try {
-      const res = await fetch(
-        `/api/kiosk/floor-status?salonId=${encodeURIComponent(salonId)}`,
-        { cache: "no-store" }
-      );
-      if (res.ok) {
-        const json = await res.json();
-        setStations(json.stations || []);
-        setUpdatedAt(json.generatedAt);
-      }
-    } catch {}
-  }
-
   useEffect(() => {
-    load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
+    if (!salonId) return;
+    let active = true;
+    const loadStatus = async () => {
+      try {
+        const res = await fetch(
+          `/api/kiosk/floor-status?salonId=${encodeURIComponent(salonId)}`,
+          {
+            cache: "no-store",
+            headers: { 'X-Kiosk-Token': localStorage.getItem('salonflow-kiosk-token') || '' },
+          }
+        );
+        if (res.ok && active) {
+          const json = await res.json();
+          setStations(json.stations || []);
+          setUpdatedAt(json.generatedAt);
+        }
+      } catch {
+        // The next poll retries; stale data remains visible with its timestamp.
+      }
+    };
+    void loadStatus();
+    const id = setInterval(() => void loadStatus(), 5000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
   }, [salonId]);
 
   return (

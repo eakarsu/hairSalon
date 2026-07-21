@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { requireKiosk } from '@/lib/api-access';
+import { routeError } from '@/lib/route-error';
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,6 +11,7 @@ export async function POST(request: NextRequest) {
     if (!salonId || !clientName || !clientPhone) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
+    await requireKiosk(request.headers, salonId);
 
     // Check if client exists
     let client = await prisma.client.findFirst({
@@ -24,7 +27,7 @@ export async function POST(request: NextRequest) {
           salonId,
           name: clientName,
           phone: clientPhone,
-          marketingOptIn: true,
+          marketingOptIn: false,
         },
       });
     }
@@ -64,7 +67,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Walk-in registration error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return routeError(error);
   }
 }

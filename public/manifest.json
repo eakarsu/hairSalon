@@ -1,7 +1,7 @@
 {
-  "name": "NailFlow AI - Salon Management",
+  "name": "SalonFlow - Service Operations",
   "short_name": "NailFlow",
-  "description": "Professional nail salon management with AI-powered features",
+  "description": "Professional salon booking and service operations",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
