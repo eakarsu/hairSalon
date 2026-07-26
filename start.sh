@@ -125,6 +125,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+if [[ "${NODE_ENV:-development}" != production ]]; then
+  BOOTSTRAP_ACKNOWLEDGEMENT=create-initial-admin node "$source_dir/scripts/provision-admin.cjs"
+fi
 HOST="${HOST:-127.0.0.1}" PORT="$ui_port" npm --prefix "$source_dir" start &
 app_pid=$!
 child_pids="$app_pid"

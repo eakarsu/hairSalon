@@ -11,7 +11,15 @@ async function main() {
   const name = String(process.env.PROVISION_ADMIN_NAME || '').trim();
   if (!email.includes('@') || password.length < 12 || !name) throw new Error('Valid PROVISION_ADMIN_* environment is required');
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) { console.log(JSON.stringify({ event: 'initial_admin_exists' })); return; }
+  if (existing) {
+    if (process.env.NODE_ENV === 'production') { console.log(JSON.stringify({ event: 'initial_admin_exists' })); return; }
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { name, hashedPassword: await hash(password, 12), role: 'OWNER', active: true, emailVerified: true },
+    });
+    console.log(JSON.stringify({ event: 'initial_admin_reconciled', userId: existing.id }));
+    return;
+  }
   const salon = await prisma.salon.create({
     data: {
       name: process.env.PROVISION_COMPANY_NAME || `${name} Salon`,
