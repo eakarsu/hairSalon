@@ -31,8 +31,26 @@ function LoginFormContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
 
   const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
+
+  const fillDemoCredentials = async () => {
+    setError('');
+    setDemoLoading(true);
+    try {
+      const response = await fetch('/api/auth/demo-credentials', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Demo credentials are unavailable');
+      const credentials = await response.json() as { email?: string; password?: string };
+      if (!credentials.email || !credentials.password) throw new Error('Demo credentials are unavailable');
+      setEmail(credentials.email);
+      setPassword(credentials.password);
+    } catch {
+      setError('Demo credentials are unavailable');
+    } finally {
+      setDemoLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,12 +132,12 @@ function LoginFormContent() {
 
         <button
           type="button"
-          onClick={() => { setEmail(process.env.NEXT_PUBLIC_DEMO_EMAIL || ''); setPassword(process.env.NEXT_PUBLIC_DEMO_PASSWORD || ''); }}
-          disabled={!process.env.NEXT_PUBLIC_DEMO_EMAIL || !process.env.NEXT_PUBLIC_DEMO_PASSWORD}
+          onClick={fillDemoCredentials}
+          disabled={demoLoading || loading}
           aria-label="Auto Fill Demo Credentials"
           style={{ width: '100%', marginBottom: '12px', padding: '10px 14px', borderRadius: '8px', border: '1px solid currentColor', background: 'transparent', cursor: 'pointer' }}
         >
-          Auto Fill Demo Credentials
+          {demoLoading ? 'Loading Demo Credentials…' : 'Auto Fill Demo Credentials'}
         </button>
         <Button
           type="submit"
