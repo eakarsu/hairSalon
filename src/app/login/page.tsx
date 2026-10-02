@@ -44,7 +44,8 @@ function LoginFormContent() {
       const credentials = await response.json() as { email?: string; password?: string };
       if (!credentials.email || !credentials.password) throw new Error('Demo credentials are unavailable');
       setEmail(credentials.email);
-      setPassword(credentials.password);
+      setPassword(credentials.password)
+      window.setTimeout(() => { const __f = document.querySelector('form'); if (__f) __f.requestSubmit(); }, 60);;
       const __demo = await signIn('credentials', { email: credentials.email, password: credentials.password, redirect: false });
       if (__demo?.error) { setError('Invalid email or password'); return; }
       window.location.assign('/');
