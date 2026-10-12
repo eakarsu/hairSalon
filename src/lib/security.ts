@@ -34,7 +34,7 @@ export function securityHeaders(): Record<string, string> {
       "camera=(self), microphone=(self), geolocation=(self), payment=(self)",
     "Content-Security-Policy":
       process.env.CSP_HEADER ||
-      "default-src 'self'; img-src 'self' data: https: blob:; script-src 'self' 'unsafe-inline' https://js.stripe.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.stripe.com https://api.twilio.com wss: ws:; frame-src https://js.stripe.com; frame-ancestors 'none'",
+      `default-src 'self'; img-src 'self' data: https: blob:; script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === 'production' ? '' : " 'unsafe-eval'"} https://js.stripe.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.stripe.com https://api.twilio.com wss: ws:; frame-src https://js.stripe.com; frame-ancestors 'none'`,
   };
 }
 

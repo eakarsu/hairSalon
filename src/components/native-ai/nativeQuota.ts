@@ -1,0 +1,2 @@
+const owners=new Map<string,{count:number;expires:number}>();
+export function claim(owner:string){const now=Date.now();for(const[id,row]of owners)if(row.expires<=now)owners.delete(id);const row=owners.get(owner)||{count:0,expires:now+3600000};if(row.count>=20)throw Object.assign(new Error('Hourly AI request limit reached. Try again later.'),{status:429});if(!owners.has(owner)&&owners.size>=10000)throw Object.assign(new Error('AI request capacity is temporarily unavailable.'),{status:503});row.count++;owners.set(owner,row);}

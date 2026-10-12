@@ -92,7 +92,7 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -135,7 +135,7 @@ export default function ClientsPage() {
       const response = await fetch('/api/clients');
       if (response.ok) {
         const data = await response.json();
-        setClients(data.clients || []);
+        setClients(Array.isArray(data.clients) ? data.clients : []);
       }
     } catch (error) {
       console.error('Failed to fetch clients:', error);

@@ -98,7 +98,7 @@ export default function InventoryPage() {
   const [selectedTab, setSelectedTab] = useState(0);
   const [filterCategory, setFilterCategory] = useState('');
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   // Add/Edit Dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -149,7 +149,7 @@ export default function InventoryPage() {
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
-        setItems(data.items || []);
+        setItems(Array.isArray(data.items) ? data.items : []);
       } else {
         toast.showError('Failed to load inventory');
       }

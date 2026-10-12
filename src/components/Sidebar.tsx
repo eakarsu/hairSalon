@@ -49,6 +49,7 @@ import {
 const drawerWidth = 260;
 
 const menuItems = [
+  { text: 'AI workspace', icon: <ReportsIcon />, path: '/ai-workspace' },
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
   { text: 'Calendar', icon: <CalendarIcon />, path: '/calendar' },
   { text: 'Clients', icon: <PeopleIcon />, path: '/clients' },

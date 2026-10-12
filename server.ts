@@ -65,10 +65,12 @@ app.prepare().then(() => {
         io.adapter(createAdapter(pubClient, subClient));
         console.log('> Socket.io Redis adapter attached');
       } catch (err) {
-        console.warn(
-          '> Redis adapter unavailable, continuing without horizontal scale:',
-          err
-        );
+        const message = err instanceof Error ? err.message : String(err);
+        if (/Cannot find (package|module)|ERR_MODULE_NOT_FOUND/.test(message)) {
+          console.log('> Redis adapter not installed; running single-instance. Install @socket.io/redis-adapter + redis for horizontal scale.');
+        } else {
+          console.log('> Redis adapter unavailable; running single-instance:', message);
+        }
       }
     })();
   }

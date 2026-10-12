@@ -153,10 +153,10 @@ export default function TipsPage() {
       const techData = await techRes.json();
       const appointmentsData = await appointmentsRes.json();
 
-      setTips(tipsData.tips || []);
+      setTips(Array.isArray(tipsData.tips) ? tipsData.tips : []);
       setSummary(tipsData.summary || null);
-      setTechnicians(techData.technicians || []);
-      setTodayAppointments(appointmentsData.appointments || []);
+      setTechnicians(Array.isArray(techData.technicians) ? techData.technicians : []);
+      setTodayAppointments(Array.isArray(appointmentsData.appointments) ? appointmentsData.appointments : []);
     } catch {
       setError('Failed to load tips');
       showError('Failed to load tips');
@@ -479,7 +479,7 @@ export default function TipsPage() {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {tips.slice(0, 10).map((tip) => (
+                      {tips.slice(0, 25).map((tip) => (
                         <TableRow
                           key={tip.id}
                           hover

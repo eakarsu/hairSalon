@@ -21,7 +21,10 @@ const server = http.createServer((request, response) => {
     response.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
     upstreamResponse.pipe(response);
   });
+  request.once('aborted', () => upstream.destroy());
+  response.once('close', () => { if(!response.writableEnded)upstream.destroy(); });
   upstream.on('error', () => {
+    if(response.destroyed||response.writableEnded)return;
     if (!response.headersSent) response.writeHead(502, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ error: 'Application service is starting' }));
   });

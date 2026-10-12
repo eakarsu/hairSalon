@@ -69,7 +69,7 @@ export default function LocationsPage() {
       const res = await fetch('/api/locations');
       if (!res.ok) throw new Error('Failed to fetch locations');
       const data = await res.json();
-      setLocations(data.locations);
+      setLocations(Array.isArray(data.locations) ? data.locations : []);
     } catch (err) {
       setError('Failed to load locations');
       console.error(err);

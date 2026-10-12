@@ -16,7 +16,7 @@ export interface OpenRouterEvidence {
   };
 }
 
-export async function requestAppointmentReadiness(appointmentSummary: string): Promise<OpenRouterEvidence> {
+export async function requestAppointmentReadiness(appointmentSummary: string, signal?: AbortSignal): Promise<OpenRouterEvidence> {
   const baseUrl = (process.env.OPENROUTER_BASE_URL || CANONICAL_OPENROUTER_BASE_URL).replace(/\/$/, '');
   if (baseUrl !== CANONICAL_OPENROUTER_BASE_URL) {
     throw new Error('OPENROUTER_BASE_URL must use the canonical OpenRouter API endpoint');
@@ -47,7 +47,7 @@ export async function requestAppointmentReadiness(appointmentSummary: string): P
         },
       ],
     }),
-    signal: AbortSignal.timeout(45_000),
+    signal: signal ? AbortSignal.any([signal,AbortSignal.timeout(45_000)]) : AbortSignal.timeout(45_000),
   });
   const payload = await response.json().catch(() => null) as OpenRouterPayload | null;
   if (!response.ok) throw new Error(`OpenRouter request failed with status ${response.status}`);

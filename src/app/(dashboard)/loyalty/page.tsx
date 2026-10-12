@@ -112,7 +112,7 @@ export default function LoyaltyPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTier, setSelectedTier] = useState(0);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
 
   // Points dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -161,7 +161,7 @@ export default function LoyaltyPage() {
       const response = await fetch('/api/loyalty');
       if (response.ok) {
         const data = await response.json();
-        setAccounts(data.accounts || []);
+        setAccounts(Array.isArray(data.accounts) ? data.accounts : []);
       } else {
         showError('Failed to load loyalty accounts');
       }
